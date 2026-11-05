@@ -16,6 +16,8 @@ const BANNED_PHRASES = [
   'rubber duck', "we've all been there", 'no judgment', 'no judgement', 'bless your heart', 'chatgpt', 'copy-paste', 'copy paste',
   'living rent free', 'main character', 'the struggle is real', 'hold my beer', 'said no one ever', 'in this economy',
   'it is what it is', 'git blame yourself',
+  // found in real model output during the model comparison:
+  'deck chairs', 'titanic', 'into the void', 'dumpster fire', 'hold my', 'chef\'s kiss',
 ];
 // Explaining the joke.
 const EXPLAINERS = ['get it?', 'get it,', 'the joke is', 'pun intended', 'see what i did', 'that was a joke', 'just kidding', 'jk,', '(joke)'];
