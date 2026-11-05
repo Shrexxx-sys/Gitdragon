@@ -98,7 +98,8 @@ function repoAngles(result) {
   if (PLACEHOLDER_NAME.test(short)) {
     A.push(card('placeholder_name', 66, `The repository is literally named "${short}".`, { quote: short, source: src('name') }));
   }
-  if (t && t.messyFileCount) {
+  // In big codebases names like "partial_copy.c" are real function names, not leftovers: small repos only.
+  if (t && t.messyFileCount && t.fileCount <= 500) {
     A.push(card('messy_files', 60 + Math.min(20, t.messyFileCount * 3), `${t.messyFileCount} file${t.messyFileCount === 1 ? ' has' : 's have'} names like ${t.messyFiles.slice(0, 3).map((x) => `"${x.split('/').pop()}"`).join(', ')}.`, { quote: t.messyFiles[0].split('/').pop(), details: t.messyFiles.map((x) => x.split('/').pop()), source: src('messy_names') }));
   }
   if (rd && rd.words >= 300 && f.license && t && t.hasTests && t.hasCi && f.stars === 0) {
@@ -238,12 +239,12 @@ function profileAngles(result) {
   }
 
   // Specific fallbacks.
-  if (f.topRepos[0]) {
+  if (f.topRepos[0] && !A.some((a) => a.angle === 'star_giant')) {
     const r = f.topRepos[0];
     A.push(card('top_repo', 16, `The most-starred original repo is ${r.name} with ${r.stars} stars${r.description ? `: "${r.description}"` : ''}.`, { quote: r.name, details: [String(r.stars)], source: src('top_repos', reposSrc) }));
   }
   if (f.mostActiveRecentRepo) {
-    A.push(card('recent_focus', 14, `Most recent public activity is on ${f.mostActiveRecentRepo.repo} (${f.mostActiveRecentRepo.events} events).`, { quote: f.mostActiveRecentRepo.repo, details: [String(f.mostActiveRecentRepo.events)], source: src('most_active_recent') }));
+    A.push(card('recent_focus', 14, `${f.mostActiveRecentRepo.events} of the ${f.recentEvents} recent public events are on ${f.mostActiveRecentRepo.repo}.`, { quote: f.mostActiveRecentRepo.repo, details: [String(f.mostActiveRecentRepo.events)], source: src('most_active_recent') }));
   }
   if (f.topLanguages[0]) {
     A.push(card('language_habit', 12, `${f.topLanguages[0].name} in ${f.topLanguages[0].count} original repo${f.topLanguages[0].count === 1 ? '' : 's'}.`, { number: f.topLanguages[0].count, details: [f.topLanguages[0].name], source: src('top_languages', reposSrc) }));

@@ -5,6 +5,14 @@
 const { humanDays } = require('../facts/util');
 const { checkJoke, openingPattern, allowedNumbersFor } = require('./checks');
 
+/** Stable choice per target: the same repo always gets the same punchline, different repos usually differ. */
+function pick(f, options) {
+  const key = f.name || f.login || '';
+  let h = 0;
+  for (const ch of key) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  return options[h % options.length];
+}
+
 const q = (s) => `"${s}"`;
 const list = (arr, n = 2) => arr.slice(0, n).map(q).join(' and ');
 const s = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
@@ -168,9 +176,9 @@ const REPO = {
     savage: `Sole author of the last ${f.commits.sampleSize} commits: ${f.commits.topAuthor.name}. No witnesses, no accomplices.`,
   }),
   issue_pile: (f) => ({
-    mild: `${f.openIssuesAndPrs} open issues and PRs. The inbox has an inbox.`,
-    medium: `${f.openIssuesAndPrs} open issues and pull requests. Not a backlog anymore, a geological layer.`,
-    savage: `${f.openIssuesAndPrs} open issues and PRs, aging like evidence nobody will process.`,
+    mild: `${f.openIssuesAndPrs} open issues and PRs. ${pick(f, ['The inbox has an inbox.', 'Someone will get to them. Statistically, no.', 'A suggestion box with a landfill behind it.'])}`,
+    medium: `${f.openIssuesAndPrs} open issues and pull requests. ${pick(f, ['Not a backlog anymore, a geological layer.', 'Each one a small grave nobody tends.', 'The waiting room has its own waiting room.'])}`,
+    savage: `${f.openIssuesAndPrs} open issues and PRs, ${pick(f, ['aging like evidence nobody will process.', 'piled up like mail at a house where nobody lives anymore.', 'filed, stamped and left to decompose.'])}`,
   }),
   no_tests: (f) => ({
     mild: `${f.tree.fileCount} files, zero tests. Confidence is a strategy.`,
@@ -195,26 +203,26 @@ const REPO = {
   latest_message: (f) => {
     const c = f.commits;
     return {
-      mild: `Latest word from the repo, dated ${c.lastCommit}: ${q(c.recentMessages[0])}.`,
-      medium: `Most recent testimony, ${c.lastCommit}: ${q(c.recentMessages[0])}. The court will allow it.`,
-      savage: `Its newest commit message is ${q(c.recentMessages[0])}, entered ${c.lastCommit}. Prosecution rests.`,
+      mild: `Latest word from the repo, dated ${c.lastCommit}: ${q(c.recentMessages[0])}. ${pick(f, ['Gripping.', 'Noted for the record.', 'Somebody frame that.'])}`,
+      medium: `Most recent testimony, ${c.lastCommit}: ${q(c.recentMessages[0])}. ${pick(f, ['The court will allow it.', 'Entered into evidence without objection.', 'The witness may step down.'])}`,
+      savage: `Its newest commit message is ${q(c.recentMessages[0])}, entered ${c.lastCommit}. ${pick(f, ['Prosecution rests.', 'Read it at the funeral.', 'That is the whole statement to the press.'])}`,
     };
   },
   cadence: (f) => {
     const c = f.commits;
     const every = c.medianGapDays === 0 ? 'several a day' : c.medianGapDays === 1 ? 'one a day' : `one every ${c.medianGapDays} days`;
     return {
-      mild: `${c.total} commits, typically ${every}. Like clockwork nobody wound.`,
-      medium: `Typical pace: ${every}, kept up for ${c.total} commits. Absurd precision for something nobody is timing.`,
-      savage: `${c.total} commits at ${every}. A heartbeat monitor that refuses to flatline.`,
+      mild: `${c.total} commits, typically ${every}. ${pick(f, ['Like clockwork nobody wound.', 'Steady as a dripping tap.', 'A metronome with commit access.'])}`,
+      medium: `Typical pace: ${every}, kept up for ${c.total} commits. ${pick(f, ['Absurd precision for something nobody is timing.', 'The heartbeat of something that refuses to be finished.', 'Consistency is a virtue, and also a symptom.'])}`,
+      savage: `${c.total} commits at ${every}. ${pick(f, ['A heartbeat monitor that refuses to flatline.', 'The machine keeps breathing whether or not anyone is in the room.', 'Nobody can stop it now, least of all the maintainers.'])}`,
     };
   },
   language_mix: (f) => {
     const l = f.languages[0];
     return {
-      mild: `${l.name} is ${l.percent}% of the code. Commitment, at least.`,
-      medium: `${l.percent}% ${l.name}. A monoculture, one bad dependency away from extinction.`,
-      savage: `The code is ${l.percent}% ${l.name}, the rest is witnesses.`,
+      mild: `${l.name} is ${l.percent}% of the code. ${pick(f, ['Commitment, at least.', 'No identity crisis here.', 'One language, one vision, one point of failure.'])}`,
+      medium: `${l.percent}% ${l.name}. ${pick(f, ['A monoculture, one bad dependency away from extinction.', 'Diversity was considered and rejected.', 'The other languages were not invited.'])}`,
+      savage: `The code is ${l.percent}% ${l.name}, ${pick(f, ['the rest is witnesses.', 'the rest is crime scene tape.', 'and the remainder is filed under "misc".'])}`,
     };
   },
   stars_and_age: (f) => ({
@@ -310,17 +318,17 @@ const PROFILE = {
   long_silence: (f) => {
     const g = f.largestActivityGap;
     return {
-      mild: `${g.days} quiet days between ${g.from} and ${g.to}. A sabbatical.`,
-      medium: `From ${g.from} to ${g.to}, ${g.days} days of silence. Long enough to be declared missing in most places.`,
-      savage: `${g.days} days without a sign of life (${g.from} to ${g.to}). The profile was legally a cold case.`,
+      mild: `${g.days} quiet days between ${g.from} and ${g.to}. ${pick(f, ['A sabbatical.', 'Gone fishing, apparently.', 'The keyboard got a long rest.'])}`,
+      medium: `From ${g.from} to ${g.to}, ${g.days} days of silence. ${pick(f, ['Long enough to be declared missing in most places.', 'Plants were watered by nobody.', 'The repos aged in the dark like cheese.'])}`,
+      savage: `${g.days} days without a sign of life (${g.from} to ${g.to}). ${pick(f, ['The profile was legally a cold case.', 'Search teams found only stale branches.', 'The obituary was drafted and then, awkwardly, withdrawn.'])}`,
     };
   },
   star_giant: (f) => {
     const t = f.topRepos[0];
     return {
-      mild: `${f.totalStars} total stars, ${t.stars} of them on ${t.name}. Hard to argue with.`,
-      medium: `${t.name} holds ${t.stars} of ${f.totalStars} stars. The other repos are understudies who never go on.`,
-      savage: `${f.totalStars} stars, and ${t.name} carries ${t.stars} of them. Everything else is supporting cast with no lines.`,
+      mild: `${f.totalStars} total stars, ${t.stars} of them on ${t.name}. ${pick(f, ['Hard to argue with.', 'One hit carries the album.', 'The rest of the repos ride for free.'])}`,
+      medium: `${t.name} holds ${t.stars} of ${f.totalStars} stars. ${pick(f, ['The other repos are understudies who never go on.', 'Every other repo lives in its shadow, rent-free.', 'One headliner, a hundred opening acts nobody stays for.'])}`,
+      savage: `${f.totalStars} stars, and ${t.name} carries ${t.stars} of them. ${pick(f, ['Everything else is supporting cast with no lines.', 'The rest of the profile is a very long footnote.', 'Everything else is the B-side nobody flips to.'])}`,
     };
   },
   one_language: (f) => {
@@ -357,9 +365,9 @@ const PROFILE = {
   recent_focus: (f) => {
     const r = f.mostActiveRecentRepo;
     return {
-      mild: `Recently: ${s(r.events, 'event')} on ${r.repo}. Focused.`,
-      medium: `${s(r.events, 'recent event')}, all circling ${r.repo}. The logs describe it without judgment.`,
-      savage: `${s(r.events, 'event')} on ${r.repo} lately. Returning to the scene, as they do.`,
+      mild: `${r.events} of the ${f.recentEvents} recent public events are on ${r.repo}. Focused.`,
+      medium: `${r.events} of ${f.recentEvents} recent events orbit ${r.repo}. Every road leads back to the same repo.`,
+      savage: `${r.events} of the last ${f.recentEvents} events happened at ${r.repo}. Returning to the scene, as they do.`,
     };
   },
   language_habit: (f) => {
