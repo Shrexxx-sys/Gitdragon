@@ -23,6 +23,16 @@ function createApp({ env = process.env, gh, provider } = {}) {
   app.use(cors()); // the extension calls us from its background worker
   app.disable('x-powered-by');
 
+  app.get('/', (req, res) => {
+    res.json({
+      name: 'Git Autopsy backend',
+      status: 'running',
+      try: ['/health', '/repo/expressjs/cors', '/profile/octocat'],
+      ai: provider ? `${provider.name} (${provider.model})` : 'offline templates',
+      githubToken: gh.hasToken,
+    });
+  });
+
   app.get('/health', (req, res) => {
     res.json({ ok: true, ai: provider ? `${provider.name} (${provider.model})` : 'offline templates', githubToken: gh.hasToken });
   });

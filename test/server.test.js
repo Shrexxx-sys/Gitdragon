@@ -92,6 +92,14 @@ test('GitHub unreachable -> 502 with NETWORK_ERROR', async (t) => {
   assert.equal((await res.json()).error.code, 'NETWORK_ERROR');
 });
 
+test('/ shows a help message instead of an error', async (t) => {
+  const { server, base } = await startServer(replayFetch(allFixtures));
+  t.after(() => server.close());
+  const res = await fetch(`${base}/`);
+  assert.equal(res.status, 200);
+  assert.ok((await res.json()).try.includes('/health'));
+});
+
 test('/health reports the AI mode', async (t) => {
   const { server, base } = await startServer(replayFetch(allFixtures));
   t.after(() => server.close());
