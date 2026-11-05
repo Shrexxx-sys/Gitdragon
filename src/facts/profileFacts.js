@@ -6,6 +6,49 @@ const { daysBetween, day, humanDays, largestGap, pct, ev, plural } = require('./
 
 const PLACEHOLDER_NAME = /^(test|tests|testing|test-?repo\d*|test\d*|untitled|untitled-?\d*|demo|demo\d*|temp|tmp|new-?repo(sitory)?|my-?repo|repo\d*|project\d*|my-?project|hello-?world|helloworld|first-?(repo|project)?|my-?first-?\w*|practice|sample|example|asdf+|abc|xyz|foo|bar|playground|sandbox|learning|learn-?\w*|copy|.*-copy)$/i;
 
+// Classic tutorial projects. Several repos matching the same one = "followed the same tutorial again".
+const TUTORIALS = [
+  ['todo app', /to-?do|task-?(list|manager|app)/i],
+  ['weather app', /weather/i],
+  ['calculator', /calc(ulator)?/i],
+  ['portfolio site', /portfolio/i],
+  ['tic-tac-toe', /tic-?tac-?toe|tictactoe/i],
+  ['clone of a famous site', /(netflix|amazon|spotify|youtube|twitter|instagram|airbnb|uber|facebook|whatsapp|discord|google)[-_]?clone|clone[-_]?(netflix|amazon|spotify|youtube|twitter|instagram)/i],
+  ['landing page', /landing[-_]?page/i],
+  ['quiz app', /quiz/i],
+  ['chat app', /chat[-_]?app|chatapp/i],
+  ['blog', /^(my[-_]?)?blog/i],
+  ['snake game', /snake/i],
+  ['rock-paper-scissors', /rock[-_]?paper|rps[-_]?game/i],
+  ['number guessing game', /guess(ing)?[-_]?(the[-_]?)?(number|game)/i],
+  ['dotfiles', /^\.?dotfiles$/i],
+];
+
+/** Groups repos that follow the same tutorial: [{ tutorial, repos: [names] }], only groups of 2+. */
+function findTutorialGroups(repos) {
+  const groups = [];
+  for (const [tutorial, re] of TUTORIALS) {
+    const names = repos.filter((r) => re.test(r.name)).map((r) => r.name);
+    if (names.length >= 2) groups.push({ tutorial, repos: names.slice(0, 6), count: names.length });
+  }
+  return groups.sort((a, b) => b.count - a.count);
+}
+
+/** Finds numbered name series like test, test2, test3: [{ base, names }] for series of 2+. */
+function findNumberedSeries(repos) {
+  const byBase = {};
+  for (const r of repos) {
+    const m = r.name.toLowerCase().match(/^(.*?)[-_ ]?(\d{1,3})?$/);
+    const base = m[1].replace(/[-_ ]+$/, '');
+    if (!base || base.length < 2) continue;
+    (byBase[base] = byBase[base] || []).push({ name: r.name, num: m[2] ? Number(m[2]) : 0 });
+  }
+  return Object.entries(byBase)
+    .filter(([, list]) => list.length >= 2 && list.some((x) => x.num > 0))
+    .map(([base, list]) => ({ base, names: list.sort((a, b) => a.num - b.num).map((x) => x.name).slice(0, 6), count: list.length }))
+    .sort((a, b) => b.count - a.count);
+}
+
 function computeProfileFacts(raw, now = new Date()) {
   const u = raw.user;
   const api = `https://api.github.com/users/${u.login}`;
@@ -101,6 +144,11 @@ function computeProfileFacts(raw, now = new Date()) {
     recentEventTypes: eventTypes,
     mostActiveRecentRepo: mostActiveRecentRepo ? { repo: mostActiveRecentRepo[0], events: mostActiveRecentRepo[1] } : null,
     pinned: raw.pinned,
+    tutorialGroups: findTutorialGroups(repos),
+    numberedSeries: findNumberedSeries(repos),
+    allDescribed: originals.length > 0 && noDescription.length === 0,
+    allReadmesPresent: raw.readmeChecks.length > 0 && missingReadme.length === 0,
+    forksCount: forks.length,
     isEmpty: repos.length === 0,
   };
 
@@ -122,6 +170,9 @@ function computeProfileFacts(raw, now = new Date()) {
       ev('no_description', 'Original repos with no description', `${noDescription.length} of ${originals.length}${noDescription.length ? `, e.g. ${facts.noDescriptionExamples.join(', ')}` : ''}`, reposSrc)
     );
     E.push(ev('zero_stars', 'Original repos with 0 stars', `${zeroStarOriginals.length} of ${originals.length}`, reposSrc));
+    for (const g of facts.tutorialGroups.slice(0, 2))
+      E.push(ev('tutorial_' + g.tutorial.replace(/[^a-z]+/g, '_'), `Repos that look like the same "${g.tutorial}" tutorial`, `${g.count}: ${g.repos.join(', ')}`, reposSrc));
+    if (facts.numberedSeries.length) E.push(ev('numbered_series', 'Numbered repo names (a series)', facts.numberedSeries.slice(0, 2).map((x) => x.names.join(', ')).join(' / '), reposSrc));
     if (placeholders.length) E.push(ev('placeholder_names', 'Repos with placeholder names (like "test", "untitled", "demo")', facts.placeholderNames.join(', '), reposSrc));
     if (emptyRepos.length) E.push(ev('empty_repos', 'Empty original repos (size 0)', emptyRepos.length, reposSrc));
     if (archived.length) E.push(ev('archived', 'Archived repos', archived.length, reposSrc));
@@ -162,4 +213,4 @@ function computeProfileFacts(raw, now = new Date()) {
   };
 }
 
-module.exports = { computeProfileFacts, PLACEHOLDER_NAME };
+module.exports = { computeProfileFacts, PLACEHOLDER_NAME, findTutorialGroups, findNumberedSeries };

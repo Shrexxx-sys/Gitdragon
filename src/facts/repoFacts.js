@@ -7,7 +7,7 @@
 
 const { daysBetween, day, median, humanDays, largestGap, gapsInDays, pct, ev, plural } = require('./util');
 
-const LAZY_MESSAGE = /^(update|updates|updated|fix|fixed|fixes|wip|changes|change|commit|stuff|asdf+|test|testing|minor|misc|done|final|oops|temp|tmp|edit|edits|save|bug ?fix|small fix|cleanup|work|working|progress|more|again|\.+|-+|\?+|!+|[a-z]{1,3})\.?!?$/i;
+const LAZY_MESSAGE = /^(update|updates|updated|fix|fixed|fixes|fix again|fixed again|wip|changes|change|commit|stuff|asdf+|test|testing|minor|misc|done|final|final ?\d+|final final|fix ?\d+|update ?\d+|test ?\d+|v\d+|pls work|please work|plz work|oops|temp|tmp|edit|edits|save|bug ?fix|small fix|cleanup|work|working|progress|more|again|\.+|-+|\?+|!+|[a-z]{1,3})\.?!?$/i;
 const WEB_UI_MESSAGE = /^(Update|Create|Delete|Rename) \S+$|^Add files via upload$/;
 
 const CI_PATTERNS = [
@@ -174,6 +174,24 @@ function analyzeTree(tree, repo, packageJson, readme) {
   };
 }
 
+/** The single day with the most commits in the sample: { date, count } */
+function busiestDay(dates) {
+  const perDay = {};
+  for (const d of dates) perDay[day(d)] = (perDay[day(d)] || 0) + 1;
+  const top = Object.entries(perDay).sort((a, b) => b[1] - a[1])[0];
+  return top ? { date: top[0], count: top[1] } : null;
+}
+
+/** Local commit hours (from the .patch Date lines). "Night" = 1:00 to 4:59 local time. */
+function analyzeCommitTimes(times) {
+  if (!times || times.length < 5) return null;
+  const hours = new Array(24).fill(0);
+  for (const t of times) hours[t.hour]++;
+  const night = hours[1] + hours[2] + hours[3] + hours[4];
+  const peakHour = hours.indexOf(Math.max(...hours));
+  return { sampled: times.length, night, nightPercent: pct(night, times.length), peakHour, peakCount: hours[peakHour] };
+}
+
 function analyzeCommits(raw, now) {
   const commits = raw.commits;
   if (!commits.length) return null;
@@ -209,6 +227,8 @@ function analyzeCommits(raw, now) {
     lazyExamples: [...new Set(lazy)].slice(0, 4),
     webUiCount: webUi.length,
     avgMessageLength: avgLen,
+    busiestDay: busiestDay(dates),
+    finalMessages: [...new Set(messages.filter((m) => /\bfinal/i.test(m)))].slice(0, 4),
     recentMessages: messages.slice(0, 10).map((m) => m.slice(0, 100)),
   };
 }
@@ -228,6 +248,14 @@ function computeRepoFacts(raw, now = new Date()) {
   const api = `https://api.github.com/repos/${r.full_name}`;
   const commits = analyzeCommits(raw, now);
   const readme = analyzeReadme(raw.readme);
+  if (readme) {
+    // README that only repeats the title: remove the repo name and description, see what is left.
+    const strip = (t) => String(t || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+    let rest = ' ' + strip(readme.excerpt) + ' ';
+    for (const w of strip(r.full_name.split('/')[1] + ' ' + (r.description || '')).split(' ')) if (w) rest = rest.replace(' ' + w + ' ', ' ');
+    readme.onlyTitle = readme.words <= 25 && rest.trim().split(' ').filter(Boolean).length <= 3;
+  }
+  const times = analyzeCommitTimes(raw.commitTimes);
   const tree = analyzeTree(raw.tree, r, raw.packageJson, raw.readme);
   const languages = languagePercents(raw.languages);
   const ageDays = daysBetween(r.created_at, now);
@@ -257,6 +285,8 @@ function computeRepoFacts(raw, now = new Date()) {
     readme,
     tree,
     packageScripts: scripts,
+    commitTimes: times,
+    todoCount: raw.todoCount ?? null,
   };
 
   // ---------- evidence rows (what the panel shows) ----------
@@ -297,6 +327,9 @@ function computeRepoFacts(raw, now = new Date()) {
     );
     if (commits.botCount) E.push(ev('bot_commits', 'Commits made by bots (like dependabot) in that sample', `${commits.botCount} of ${commits.sampleSize}`, api + '/commits?per_page=100'));
     if (commits.webUiCount) E.push(ev('web_ui_commits', 'Default GitHub web-editor messages (like "Update README.md")', `${commits.webUiCount} of ${commits.sampleSize}`, api + '/commits?per_page=100'));
+    if (commits.busiestDay && commits.busiestDay.count > 1)
+      E.push(ev('busiest_day', 'Busiest single day (in that sample)', `${commits.busiestDay.date}: ${commits.busiestDay.count} commits`, api + '/commits?per_page=100'));
+    if (commits.finalMessages.length) E.push(ev('final_messages', 'Commit messages containing "final"', commits.finalMessages.map((m) => `"${m}"`).join(', '), api + '/commits?per_page=100'));
     E.push(ev('recent_messages', 'Most recent commit messages', commits.recentMessages.map((m) => `"${m}"`).join(' | '), api + '/commits?per_page=100'));
   }
 
@@ -309,6 +342,13 @@ function computeRepoFacts(raw, now = new Date()) {
   }
   if (scripts.length) E.push(ev('package_scripts', 'npm scripts in package.json', scripts.slice(0, 10).join(', '), api + '/contents/package.json'));
 
+  if (times) {
+    E.push(
+      ev('commit_hours', "Commit times in the author's own timezone", `${times.night} of ${times.sampled} commits made between 1 AM and 5 AM; busiest hour ${times.peakHour}:00 (${times.peakCount} commits)`, `https://github.com/${r.full_name}/commits`)
+    );
+  }
+  if (raw.todoCount != null) E.push(ev('todos', 'TODO / FIXME matches (GitHub code search)', raw.todoCount, `https://github.com/search?q=repo%3A${encodeURIComponent(r.full_name)}+TODO+OR+FIXME&type=code`));
+  if (readme && readme.onlyTitle) E.push(ev('readme_only_title', 'README content', 'only repeats the project name/description', api + '/readme'));
   if (tree) {
     const treeSrc = `${api}/git/trees/${r.default_branch}?recursive=1`;
     E.push(ev('file_count', 'Files', `${tree.fileCount}${tree.truncated ? '+ (GitHub cut the list short: huge repo)' : ''} in ${tree.dirCount} folders`, treeSrc));

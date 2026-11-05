@@ -11,6 +11,42 @@ function decodeBase64(content) {
   return Buffer.from(content || '', 'base64').toString('utf8');
 }
 
+/**
+ * Pulls the "Date: Tue, 7 Apr 2026 02:33:03 +0530" lines out of a git patch.
+ * Returns [{ hour, offset }] = the LOCAL hour the author committed at, and their UTC offset.
+ * Only these lines are kept: nothing else from the patch (like emails) is stored.
+ */
+function parsePatchDates(text) {
+  const out = [];
+  const re = /^Date: \w{3}, \d{1,2} \w{3} \d{4} (\d{2}):\d{2}:\d{2} ([+-]\d{4})$/gm;
+  let m;
+  while ((m = re.exec(text))) out.push({ hour: Number(m[1]), offset: m[2] });
+  return out;
+}
+
+/** Local commit hours for the sampled commits, from ONE compare .patch request. null if unavailable. */
+async function getCommitTimes(gh, fullName, commits) {
+  if (commits.length < 2 || !gh.getText) return null;
+  const newest = commits[0].sha;
+  const oldest = commits[commits.length - 1].sha;
+  const url = `https://github.com/${fullName}/compare/${oldest}...${newest}.patch`;
+  const kept = await gh.getText(url, { keep: (t) => (t.match(/^Date: .+$/gm) || []).join('\n') });
+  if (!kept) return null;
+  const dates = parsePatchDates(kept);
+  return dates.length ? dates : null;
+}
+
+/** Number of TODO/FIXME matches via GitHub code search (needs a token). null if unavailable. */
+async function countTodos(gh, fullName, tree) {
+  if (!gh.hasToken || !tree) return null;
+  try {
+    const res = await gh.get(`/search/code?q=TODO+OR+FIXME+repo:${fullName}&per_page=1`);
+    return res.status === 200 && res.data && typeof res.data.total_count === 'number' ? res.data.total_count : null;
+  } catch {
+    return null; // code search has its own strict limit: never fail the autopsy over it
+  }
+}
+
 async function collectRepo(gh, owner, name) {
   const repoRes = await gh.get(`/repos/${owner}/${name}`);
   if (repoRes.status === 404) throw Errors.notFound(`Repository ${owner}/${name}`);
@@ -72,8 +108,15 @@ async function collectRepo(gh, owner, name) {
     }
   }
 
+  const [commitTimes, todoCount] = await Promise.all([
+    getCommitTimes(gh, repo.full_name, commits),
+    countTodos(gh, repo.full_name, tree),
+  ]);
+
   return {
     fetchedAt: new Date().toISOString(),
+    commitTimes,
+    todoCount,
     repo: {
       full_name: repo.full_name,
       html_url: repo.html_url,
@@ -105,4 +148,4 @@ async function collectRepo(gh, owner, name) {
   };
 }
 
-module.exports = { collectRepo };
+module.exports = { collectRepo, parsePatchDates };

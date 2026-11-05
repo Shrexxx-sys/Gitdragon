@@ -102,7 +102,38 @@ function createGithubClient({ token = '', cacheDir = '', fetchImpl = fetch, fres
     return res.json();
   }
 
-  return { get, graphql, hasToken: Boolean(token), fetchImpl };
+  /**
+   * Fetches a plain-text file from github.com (e.g. a .patch), reading at most `maxBytes`.
+   * Returns the text or null on any problem. Cached (memory + disk) because these files never change.
+   * `keep` lets the caller keep only the lines it needs, so nothing else is stored.
+   */
+  async function getText(url, { maxBytes = 3_000_000, timeoutMs = 10000, keep = (t) => t } = {}) {
+    const key = 'text:' + url;
+    const cached = readCache(key);
+    if (cached) return cached.text;
+    try {
+      const res = await fetchImpl(url, { headers: { 'User-Agent': 'git-autopsy' }, signal: AbortSignal.timeout(timeoutMs) });
+      if (!res.ok || !res.body) return null;
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let text = '';
+      let bytes = 0;
+      while (bytes < maxBytes) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        bytes += value.length;
+        text += decoder.decode(value, { stream: true });
+      }
+      reader.cancel().catch(() => {});
+      const kept = keep(text);
+      writeCache(key, { savedAt: Date.now(), text: kept });
+      return kept;
+    } catch {
+      return null;
+    }
+  }
+
+  return { get, getText, graphql, hasToken: Boolean(token), fetchImpl };
 }
 
 /** Reads the number of the "last" page from a GitHub Link header (used to count commits cheaply). */
