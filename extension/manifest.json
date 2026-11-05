@@ -1,0 +1,23 @@
+{
+  "manifest_version": 3,
+  "name": "Git Autopsy",
+  "version": "0.1.0",
+  "description": "Summarizes and roasts GitHub repos and profiles using only real, checkable facts.",
+  "permissions": ["storage"],
+  "host_permissions": ["http://localhost:3000/*", "http://127.0.0.1:3000/*"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://github.com/*"],
+      "js": ["pageDetect.js", "content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}
