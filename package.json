@@ -9,7 +9,8 @@
     "test": "node --test \"test/*.test.js\"",
     "smoke": "node scripts/smoke.js",
     "comedy": "node scripts/comedy.js",
-    "browser-check": "node scripts/browserCheck.js"
+    "browser-check": "node scripts/browserCheck.js",
+    "e2e": "node scripts/e2e.js"
   },
   "engines": {
     "node": ">=18"

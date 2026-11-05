@@ -43,13 +43,46 @@ async function postJson(url, headers, body) {
     }
     const text = await res.text();
     if (res.ok) return JSON.parse(text);
+    const retryAfter = Number(res.headers.get('retry-after')) * 1000 || 0;
+    // "You exceeded your current quota" (daily/monthly) can't succeed by waiting a few seconds: fail fast.
+    if (res.status === 429 && (/quota|RESOURCE_EXHAUSTED|billing/i.test(text) || retryAfter > 20000)) {
+      throw quotaError(`AI HTTP 429 (quota exhausted): ${text.slice(0, 200)}`);
+    }
     if (RETRY_STATUSES.includes(res.status) && attempt < RETRY_DELAYS_MS.length) {
-      const retryAfter = Number(res.headers.get('retry-after')) * 1000;
-      await sleep(Math.min(60000, retryAfter || RETRY_DELAYS_MS[attempt]));
+      await sleep(retryAfter || RETRY_DELAYS_MS[attempt]);
       continue;
     }
     throw new Error(`AI HTTP ${res.status}: ${text.slice(0, 300)}`);
   }
+}
+
+function quotaError(message) {
+  const err = new Error(message);
+  err.quota = true; // writers stop retrying when they see this
+  return err;
+}
+
+const COOL_DOWN_MS = 10 * 60 * 1000;
+
+/**
+ * Circuit breaker: after a quota error, skip this provider for 10 minutes and fail instantly,
+ * so users get the offline roast right away instead of waiting on an AI that can't answer.
+ */
+function withCircuitBreaker(provider) {
+  if (!provider) return provider;
+  let openUntil = 0;
+  return {
+    ...provider,
+    async generate(system, user, opts) {
+      if (Date.now() < openUntil) throw quotaError('AI quota exhausted (cooling down for a few minutes)');
+      try {
+        return await provider.generate(system, user, opts);
+      } catch (err) {
+        if (err.quota) openUntil = Date.now() + COOL_DOWN_MS;
+        throw err;
+      }
+    },
+  };
 }
 
 function chatMessages(system, user) {
@@ -132,8 +165,12 @@ function ollamaProvider(url = 'http://localhost:11434', model = 'llama3.2') {
   };
 }
 
-/** Builds a provider by name. Returns null if its key is missing (or name is "offline"). */
+/** Builds a provider by name (with the circuit breaker). Returns null if its key is missing (or name is "offline"). */
 function buildProvider(name, model, env) {
+  return withCircuitBreaker(buildRawProvider(name, model, env));
+}
+
+function buildRawProvider(name, model, env) {
   switch ((name || '').toLowerCase()) {
     case 'groq':
       return env.GROQ_API_KEY ? groqProvider(env.GROQ_API_KEY, model || env.GROQ_MODEL || undefined) : null;
@@ -205,4 +242,4 @@ function withDiskCache(provider, dir) {
   };
 }
 
-module.exports = { getProvider, createProvider, withDiskCache };
+module.exports = { getProvider, createProvider, withDiskCache, withCircuitBreaker, quotaError, postJson };

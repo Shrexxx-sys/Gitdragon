@@ -112,12 +112,15 @@ async function writeSummary(result, provider) {
   const { system, user } = buildPrompt(result);
   const warnings = [];
   let feedback = '';
+  let reason = `AI summary failed validation ${MAX_ATTEMPTS} times`;
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     let text;
     try {
       text = await provider.generate(system, user + feedback, { temperature: 0.3 });
     } catch (err) {
       warnings.push(`summary: AI call failed (attempt ${attempt}): ${err.message}`);
+      reason = err.quota ? 'AI quota exhausted' : 'AI unavailable';
+      if (err.quota) break; // out of quota: retrying can't help
       continue;
     }
     let parsed;
@@ -133,7 +136,7 @@ async function writeSummary(result, provider) {
     warnings.push(`summary attempt ${attempt} rejected: ${problems.join(' ')}`);
     feedback = `\n\nYour previous reply was rejected for these reasons:\n- ${problems.join('\n- ')}\nFix them and reply again with JSON only.`;
   }
-  return { summary: offlineSummary(result), by: `offline templates (AI summary failed validation ${MAX_ATTEMPTS} times)`, attempts: MAX_ATTEMPTS, warnings };
+  return { summary: offlineSummary(result), by: `offline templates (${reason})`, attempts: MAX_ATTEMPTS, warnings };
 }
 
 /**

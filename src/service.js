@@ -7,7 +7,7 @@
 //        over AI limit    -> still analyse, but with the offline roast (protects the free AI quota)
 //   4. Run the analysis. If the AI is out of quota or fails, the writer already fell back to the
 //      offline roast; we add a notice that says so.
-//   5. Store full-quality results (AI-written, or no AI configured) with an expiry, plus a share link.
+//   5. Store the result with an expiry (7 days; only 30 min for offline answers while the AI is down), plus a share link.
 
 const { repoAutopsy, profileAutopsy } = require('./autopsy');
 const { sha, today, shareIdFor } = require('./store');
@@ -18,6 +18,7 @@ const CACHE_VERSION = 'v3'; // bump when the analysis format changes, so old cac
 function config(env) {
   return {
     ttlSeconds: Number(env.CACHE_TTL_HOURS || 168) * 3600, // 7 days
+    fallbackTtlSeconds: Number(env.FALLBACK_TTL_MINUTES || 30) * 60, // offline answers while the AI is down
     aiDailyLimit: Number(env.AI_DAILY_LIMIT || 20), // AI-written analyses per install per day
     hardDailyLimit: Number(env.HARD_DAILY_LIMIT || 150), // any analyses per install per day
     salt: env.HASH_SALT || 'git-autopsy-local-salt',
@@ -102,10 +103,14 @@ function createService({ gh, providers, store, env = process.env }) {
     }
     if (gh.tokenInvalid) data.notices.push("The server's GitHub token has expired, so it's using GitHub's lower public limit until the owner replaces it.");
 
-    // Only cache full-quality answers, so a temporary fallback doesn't get stuck in the cache.
-    if (!aiFellBack && (aiAllowed || !hasAI)) {
+    // Caching:
+    //   full-quality answer (AI, or no AI configured)  -> normal expiry (7 days)
+    //   AI down / out of quota (affects everyone)      -> short expiry (30 min): fast for everyone, AI retried later
+    //   one user's daily limit                         -> not cached (other users still get AI roasts)
+    const ttl = aiFellBack ? cfg.fallbackTtlSeconds : aiAllowed || !hasAI ? cfg.ttlSeconds : 0;
+    if (ttl) {
       if (req.publicUrl) data.shareUrl = `${req.publicUrl}/share/${shareIdFor(key)}`;
-      const stored = await safe(store.putResult(key, { kind, target, intensity, marker }, data, cfg.ttlSeconds), 'putResult');
+      const stored = await safe(store.putResult(key, { kind, target, intensity, marker }, data, ttl), 'putResult');
       if (!stored) delete data.shareUrl; // the link would lead nowhere
     }
     return data;

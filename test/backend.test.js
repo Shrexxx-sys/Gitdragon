@@ -150,20 +150,39 @@ test('privacy: daily counters store only a salted hash, never the raw install ID
   assert.notEqual(clientHash('pepper', { installId: 'install-secret-5555' }), clientHash('other-salt', { installId: 'install-secret-5555' }));
 });
 
-test('AI quota exhausted -> facts + summary + offline roast, a clear note, and the fallback is NOT cached', async (t) => {
-  const provider = failingAI('AI HTTP 429: RESOURCE_EXHAUSTED quota exceeded');
-  const s = await start({ provider });
+test('AI quota exhausted -> facts + summary + offline roast, a clear note, cached only briefly, fails fast', async (t) => {
+  const { quotaError, withCircuitBreaker } = require('../src/aiProvider');
+  const raw = { name: 'fake', model: 'empty', calls: 0, async generate() { raw.calls++; throw quotaError('AI HTTP 429 (quota exhausted)'); } };
+  const provider = withCircuitBreaker(raw);
+  const inner = memoryStore();
+  const ttls = [];
+  const store = { ...inner, putResult: (k, m, d, ttl) => (ttls.push(ttl), inner.putResult(k, m, d, ttl)) };
+  const s = await start({ provider, store });
   t.after(() => s.server.close());
+  const t0 = Date.now();
   const r = await s.get('/repo/octocat/Hello-World');
+  assert.ok(Date.now() - t0 < 5000, 'no long retry loops on a quota error');
   assert.equal(r.status, 200);
   assert.equal(r.body.aiStatus, 'quota');
   assert.match(r.body.notices[0], /free AI quota is used up/);
   assert.ok(r.body.summary.what_it_does && r.body.roast.length >= 3 && r.body.evidence.length > 5);
   assert.equal(r.body.aiWarnings, undefined, 'internal AI errors are not sent to users');
-  const calls = provider.calls;
-  const again = await s.get('/repo/octocat/Hello-World');
-  assert.equal(again.body.cached, undefined, 'a fallback answer is not cached');
-  assert.ok(provider.calls > calls, 'the AI is tried again next time');
+  // summary + roast run in parallel, so at most 2 calls can hit the quota before the breaker opens
+  assert.ok(raw.calls <= 2, `no retries after a quota error (got ${raw.calls} calls)`);
+  const callsAfterFirst = raw.calls;
+  assert.deepEqual(ttls, [30 * 60], 'fallback cached for 30 minutes only');
+  assert.equal((await s.get('/repo/octocat/Hello-World')).body.cached, true, 'repeat requests are fast while the AI is down');
+  await s.get('/profile/octocat');
+  assert.equal(raw.calls, callsAfterFirst, 'circuit breaker open: other targets skip the AI entirely');
+});
+
+test('daily-limit fallbacks are NOT cached (other users still get AI roasts)', async (t) => {
+  const s = await start({ env: { AI_DAILY_LIMIT: '0' } });
+  t.after(() => s.server.close());
+  const r = await s.get('/repo/octocat/Hello-World', 'install-limited-7777');
+  assert.equal(r.body.aiStatus, 'daily_limit');
+  assert.equal(r.body.shareUrl, undefined);
+  assert.equal((await s.get('/repo/octocat/Hello-World', 'install-limited-7777')).body.cached, undefined);
 });
 
 test('AI failure (not quota) -> offline roast with a different note', async (t) => {

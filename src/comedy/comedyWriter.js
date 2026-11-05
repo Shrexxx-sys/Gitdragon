@@ -120,6 +120,7 @@ async function writeRoast(result, provider, { intensity = 'medium', calibration 
       candidates = normalizeJokes(parseJson(reply).candidates);
     } catch (err) {
       warnings.push(`pass 1 attempt ${attempt} failed: ${err.message}`);
+      if (err.quota) break; // out of quota: retrying can't help
     }
   }
   debug.candidates = candidates;
@@ -147,6 +148,7 @@ async function writeRoast(result, provider, { intensity = 'medium', calibration 
       }
     } catch (err) {
       warnings.push(`pass 2 attempt ${attempt} failed: ${err.message}`);
+      if (err.quota) break;
     }
   }
 
