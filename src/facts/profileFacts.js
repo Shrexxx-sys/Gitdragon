@@ -4,7 +4,7 @@
 
 const { daysBetween, day, humanDays, largestGap, pct, ev, plural } = require('./util');
 
-const PLACEHOLDER_NAME = /^(test|tests|testing|test-?repo\d*|test\d*|untitled|untitled-?\d*|demo|demo\d*|temp|tmp|new-?repo(sitory)?|my-?repo|repo\d*|project\d*|my-?project|hello-?world|helloworld|first-?(repo|project)?|my-?first-?\w*|practice|sample|example|asdf+|abc|xyz|foo|bar|playground|sandbox|learning|learn-?\w*|copy|.*-copy|.*-test)$/i;
+const PLACEHOLDER_NAME = /^(test|tests|testing|test-?repo\d*|test\d*|untitled|untitled-?\d*|demo|demo\d*|temp|tmp|new-?repo(sitory)?|my-?repo|repo\d*|project\d*|my-?project|hello-?world|helloworld|first-?(repo|project)?|my-?first-?\w*|practice|sample|example|asdf+|abc|xyz|foo|bar|playground|sandbox|learning|learn-?\w*|copy|.*-copy)$/i;
 
 function computeProfileFacts(raw, now = new Date()) {
   const u = raw.user;

@@ -97,7 +97,7 @@ After you change extension code, click the reload icon on the Git Autopsy card i
 ## Tests
 
 ```bash
-npm test          # 46 unit/integration tests, no internet needed (uses saved GitHub responses)
+npm test          # 47 unit/integration tests, no internet needed (uses saved GitHub responses)
 npm run smoke     # full pipeline on 5 real repos + 5 real profiles + 1 error case (needs internet)
 ```
 

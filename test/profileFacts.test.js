@@ -79,5 +79,5 @@ test('pinned repos are parsed from profile HTML', () => {
 
 test('placeholder repo names', () => {
   for (const n of ['test', 'untitled', 'demo2', 'hello-world', 'my-first-app', 'test-repo1', 'asdf', 'project1']) assert.ok(PLACEHOLDER_NAME.test(n), n);
-  for (const n of ['git-autopsy', 'react', 'testcafe', 'linux']) assert.ok(!PLACEHOLDER_NAME.test(n), n);
+  for (const n of ['git-autopsy', 'react', 'testcafe', 'linux', 'eslint-node-test']) assert.ok(!PLACEHOLDER_NAME.test(n), n);
 });
