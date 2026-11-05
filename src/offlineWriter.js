@@ -5,7 +5,7 @@
 const { humanDays } = require('./facts/util');
 
 function sentence(text) {
-  const t = String(text).trim().replace(/\.+$/, '');
+  const t = String(text).replace(/\*\*|__/g, '').trim().replace(/\.+$/, '');
   return /[!?]$/.test(t) ? t : t + '.';
 }
 
@@ -60,12 +60,18 @@ function repoRoast(f) {
   if (c && c.lazyCount >= 3) lines.push(`${c.lazyCount} of the last ${c.sampleSize} commit messages are masterpieces like ${quoteList(c.lazyExamples.slice(0, 3))}. Riveting storytelling.`);
   if (c && c.webUiCount >= 3) lines.push(`${c.webUiCount} commits use GitHub's default "Update file" message. Writing a commit message is optional, apparently.`);
   if (t && t.junk.length) lines.push(`Committed ${t.junk.map((j) => j.name).join(' and ')} to the repo. .gitignore was right there.`);
+  if (c && c.botCount >= 10) lines.push(`${c.botCount} of the last ${c.sampleSize} commits were made by bots. The robots are doing the real work here.`);
+  if (c && c.topAuthor && c.topAuthor.percent >= 50 && c.topAuthor.percent < 100 && c.authorsInSample > 1)
+    lines.push(`${c.topAuthor.name} made ${c.topAuthor.percent}% of the last ${c.sampleSize} commits. Everyone else is just visiting.`);
+  if (f.openIssuesAndPrs >= 100 && f.stars < 1000) lines.push(`${f.openIssuesAndPrs} open issues + PRs. The to-do list has its own to-do list.`);
   if (t && t.messyFileCount) lines.push(`Files like ${quoteList(t.messyFiles.slice(0, 2))}. Version control exists so you don't have to do this.`);
   if (!f.readme && !f.isEmpty) lines.push('No README. The code is the documentation, and the code is not talking.');
   if (f.readme && f.readme.words < 40) lines.push(`The README is ${f.readme.words} words long. Shorter than a decent commit message.`);
   if (f.readme && f.readme.words > 4000) lines.push(`The README is ${f.readme.words} words. That's not documentation, that's a novel.`);
-  if (t && !t.hasTests) lines.push('No test files found. Bold strategy: production is the test suite.');
-  if (t && !t.hasCi && t.fileCount > 5) lines.push('No CI config. Every merge is a trust fall.');
+  if (f.readme && f.readme.words >= 1500 && f.readme.words <= 4000) lines.push(`The README is ${f.readme.words} words. Someone really wants you to read the manual.`);
+  // hasTests / hasCi are null when the file list was cut short (unknown), so only roast a confirmed "false".
+  if (t && t.hasTests === false) lines.push('No test files found. Bold strategy: production is the test suite.');
+  if (t && t.hasCi === false && t.fileCount > 5) lines.push('No CI config. Every merge is a trust fall.');
   if (!f.license && !f.isEmpty) lines.push('No license, so legally nobody is allowed to use this. Problem solved before it started.');
   if (!f.description && !f.isEmpty) lines.push('No description set. Pure mystery-box energy.');
   if (f.stars === 0 && !f.isEmpty) lines.push('0 stars. Not even a pity star from the author.');
@@ -78,7 +84,7 @@ function repoRoast(f) {
   const filler = [];
   if (f.languages.length) filler.push(`${f.languages[0].name} makes up ${f.languages[0].percent}% of the code. Commitment to one thing, at least.`);
   if (c) filler.push(`${c.total}${c.totalExact ? '' : '+'} commits over ${humanDays(f.ageDays)}. Every one of them was somebody's "quick fix".`);
-  if (f.stars > 0) filler.push(`${f.stars} stars and ${f.forks} forks. The internet has spoken, quietly.`);
+  if (f.stars > 0 && !lines.some((l) => l.startsWith(`${f.stars} stars`))) filler.push(`${f.stars} stars and ${f.forks} forks. The internet has spoken, quietly.`);
   if (t) filler.push(`${t.fileCount} files across ${t.dirCount} folders. The folder structure is doing its best.`);
   filler.push(`Created on ${f.createdAt}. It has been ${humanDays(f.ageDays)} and the autopsy is only now being performed.`);
   for (const l of filler) if (lines.length < 4) lines.push(l);

@@ -37,7 +37,9 @@ const JUNK = [
   { re: /(^|\/)\.DS_Store$/, name: '.DS_Store' },
   { re: /(^|\/)(venv|\.venv)\//, name: 'venv/' },
 ];
-const MESSY_NAME = /(^|[ _\-.(])(copy|final|old|backup|bak|untitled|temp|tmp)([ _\-.)0-9]|$)/i;
+// Names like "main_final", "app-copy2", "index_old", "script (1)", "Copy of notes", "untitled3".
+const MESSY_NAME = /((^|[ _-])(copy|final|old|backup|bak)([ _-]?\d*)$)|(\s\(\d+\)$)|(^copy of )|(^untitled\d*$)/i;
+const BOT_AUTHOR = /\[bot\]$|^(dependabot|renovate|greenkeeper|github-actions)/i;
 const RUN_COMMAND = /^(?:\$\s*)?(npm|npx|yarn|pnpm|bun|node|deno|pip3?|python3?|py|poetry|pipenv|uv|conda|cargo|go|make|cmake|docker(?:-compose)?|mvn|gradle|\.\/gradlew|java|dotnet|bundle|rails|ruby|gem|composer|php|flutter|dart|swift|brew|git clone|mix|stack|cabal|julia|Rscript|streamlit|uvicorn|flask|gunicorn|django-admin|\.\/[\w.-]+)(\s|$)/;
 
 function firstLine(msg) {
@@ -156,10 +158,10 @@ function analyzeTree(tree, repo, packageJson, readme) {
     truncated: tree.truncated,
     topLevel,
     fileTypes,
-    hasTests: testPaths.length > 0,
+    hasTests: testPaths.length > 0 ? true : tree.truncated ? null : false, // null = unknown (partial file list)
     testFileCount: testPaths.length,
     testExamples: testPaths.slice(0, 3),
-    hasCi: ciFiles.length > 0,
+    hasCi: ciFiles.length > 0 ? true : tree.truncated ? null : false,
     ciFiles: ciFiles.slice(0, 5),
     licenseFile,
     manifests,
@@ -187,6 +189,7 @@ function analyzeCommits(raw, now) {
 
   const messages = commits.map((c) => firstLine(c.message));
   const lazy = messages.filter((m) => LAZY_MESSAGE.test(m));
+  const botCount = commits.filter((c) => BOT_AUTHOR.test(c.author)).length;
   const webUi = messages.filter((m) => WEB_UI_MESSAGE.test(m));
   const avgLen = Math.round(messages.reduce((s, m) => s + m.length, 0) / messages.length);
 
@@ -202,6 +205,7 @@ function analyzeCommits(raw, now) {
     authorsInSample: Object.keys(authorCounts).length,
     topAuthor: topAuthor ? { name: topAuthor[0], commits: topAuthor[1], percent: pct(topAuthor[1], commits.length) } : null,
     lazyCount: lazy.length,
+    botCount,
     lazyExamples: [...new Set(lazy)].slice(0, 4),
     webUiCount: webUi.length,
     avgMessageLength: avgLen,
@@ -291,6 +295,7 @@ function computeRepoFacts(raw, now = new Date()) {
     E.push(
       ev('lazy_messages', 'Low-effort commit messages (like "update", "fix", "wip")', `${commits.lazyCount} of ${commits.sampleSize}${commits.lazyExamples.length ? ` e.g. ${commits.lazyExamples.map((m) => `"${m}"`).join(', ')}` : ''}`, api + '/commits?per_page=100')
     );
+    if (commits.botCount) E.push(ev('bot_commits', 'Commits made by bots (like dependabot) in that sample', `${commits.botCount} of ${commits.sampleSize}`, api + '/commits?per_page=100'));
     if (commits.webUiCount) E.push(ev('web_ui_commits', 'Default GitHub web-editor messages (like "Update README.md")', `${commits.webUiCount} of ${commits.sampleSize}`, api + '/commits?per_page=100'));
     E.push(ev('recent_messages', 'Most recent commit messages', commits.recentMessages.map((m) => `"${m}"`).join(' | '), api + '/commits?per_page=100'));
   }
@@ -309,8 +314,9 @@ function computeRepoFacts(raw, now = new Date()) {
     E.push(ev('file_count', 'Files', `${tree.fileCount}${tree.truncated ? '+ (GitHub cut the list short: huge repo)' : ''} in ${tree.dirCount} folders`, treeSrc));
     E.push(ev('top_level', 'Top-level files and folders', tree.topLevel.join(', '), treeSrc));
     E.push(ev('file_types', 'Most common file types', tree.fileTypes.map((f) => `.${f.ext} (${f.count})`).join(', '), treeSrc));
-    E.push(ev('tests', 'Tests', tree.hasTests ? `yes: ${plural(tree.testFileCount, 'test-looking file')}, e.g. ${tree.testExamples.join(', ')}` : 'no test files found', treeSrc));
-    E.push(ev('ci', 'CI (automatic checks)', tree.hasCi ? `yes: ${tree.ciFiles.join(', ')}` : 'no CI config found', treeSrc));
+    const unknown = 'none found in the partial file list (repo too large to check fully)';
+    E.push(ev('tests', 'Tests', tree.hasTests ? `yes: ${plural(tree.testFileCount, 'test-looking file')}, e.g. ${tree.testExamples.join(', ')}` : tree.hasTests === null ? unknown : 'no test files found', treeSrc));
+    E.push(ev('ci', 'CI (automatic checks)', tree.hasCi ? `yes: ${tree.ciFiles.join(', ')}` : tree.hasCi === null ? unknown : 'no CI config found', treeSrc));
     E.push(ev('manifests', 'Project/build files', tree.manifests.length ? tree.manifests.join(', ') : 'none found', treeSrc));
     if (tree.entryPoints.length) E.push(ev('entry_points', 'Likely entry-point files', tree.entryPoints.join(', '), treeSrc));
     E.push(ev('read_first', 'Suggested files to read first', tree.readFirst.join(', ') || 'none', treeSrc));

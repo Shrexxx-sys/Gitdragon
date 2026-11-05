@@ -120,6 +120,31 @@ test('README analysis finds headings, run commands and the first real paragraph'
   assert.equal(r.firstParagraph, 'A command line tool that counts words in files quickly.');
 });
 
+test('offline output passes the same "no invented numbers" check as the AI', async () => {
+  const { validateOutput } = require('../src/writer');
+  for (const [fx, o, n] of [['repo-hello-world', 'octocat', 'Hello-World'], ['repo-cors', 'expressjs', 'cors']]) {
+    const { result } = await factsFromFixture(fx, o, n);
+    assert.deepEqual(validateOutput(offlineWrite(result), result), [], fx);
+  }
+});
+
+test('huge repo with a partial file list: tests/CI are "unknown", not "missing"', () => {
+  const { analyzeTree } = require('../src/facts/repoFacts');
+  const t = analyzeTree({ truncated: true, entries: [{ path: 'src/main.c', type: 'blob', size: 10 }] }, {}, null, null);
+  assert.equal(t.hasTests, null);
+  assert.equal(t.hasCi, null);
+  const small = analyzeTree({ truncated: false, entries: [{ path: 'main.py', type: 'blob', size: 10 }] }, {}, null, null);
+  assert.equal(small.hasTests, false);
+});
+
+test('messy file names: catches copies/finals, ignores normal words', () => {
+  const entries = ['main_final.py', 'app-copy2.js', 'index_old.html', 'script (1).py', 'Copy of notes.txt', 'untitled3.ipynb',
+    'old_microcode.rst', 'sparx5-temp.yaml', 'threshold.js', 'folder.js'].map((p) => ({ path: p, type: 'blob', size: 1 }));
+  const { analyzeTree } = require('../src/facts/repoFacts');
+  const t = analyzeTree({ truncated: false, entries }, {}, null, null);
+  assert.equal(t.messyFileCount, 6);
+});
+
 test('commit message classifiers', () => {
   for (const m of ['update', 'fix', 'wip', 'asdf', '.', 'Final', 'minor']) assert.ok(LAZY_MESSAGE.test(m), m);
   for (const m of ['Add CORS preflight support', 'docs: revamp content (#374)']) assert.ok(!LAZY_MESSAGE.test(m), m);
