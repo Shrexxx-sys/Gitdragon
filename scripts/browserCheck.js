@@ -61,7 +61,8 @@ function probe() {
   }
   console.log(`Extension: ${EXT}\nBackend:   ${backendUrl}`);
   fs.mkdirSync(SHOTS, { recursive: true });
-  if (!fs.existsSync(puppeteer.executablePath())) {
+  const chromePath = await Promise.resolve(puppeteer.executablePath()).catch(() => ''); // a Promise in newer puppeteer
+  if (!chromePath || !fs.existsSync(chromePath)) {
     console.error('Chrome for Testing is not installed yet. Run once:  npx puppeteer browsers install chrome');
     process.exit(1);
   }

@@ -20,7 +20,9 @@ function check(name, ok, detail = '') {
 }
 
 function run(cmd, args, cwd, extraEnv = {}, timeout = 600000) {
-  const r = spawnSync(cmd, args, { cwd, encoding: 'utf8', shell: process.platform === 'win32', timeout, env: { ...process.env, ...extraEnv } });
+  // Only npm needs a shell on Windows (npm.cmd); a shell would split paths with spaces for everything else.
+  const shell = process.platform === 'win32' && cmd === 'npm';
+  const r = spawnSync(cmd, args, { cwd, encoding: 'utf8', shell, timeout, env: { ...process.env, ...extraEnv } });
   return { code: r.status, out: (r.stdout || '') + (r.stderr || '') };
 }
 
