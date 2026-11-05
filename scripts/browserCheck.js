@@ -2,7 +2,10 @@
 // Verifies: the dragon videos actually play under GitHub's CSP, hover -> fire, click -> box,
 // "Run Analysis" against a local backend, and nothing injected on non-repo/profile pages.
 // Usage: npm run browser-check            (screenshots go to .cache/screenshots/)
-// Needs internet (github.com). Starts its own local backend in offline mode on port 3999.
+//   EXT_DIR=<folder>       test another copy of the extension (e.g. the unzipped share zip)
+//   BACKEND_URL=<url>      use that backend instead of starting a local one (e.g. the deployed one)
+// Needs internet (github.com) and Chrome for Testing (once: npx puppeteer browsers install chrome).
+// Without BACKEND_URL it starts its own local backend in offline mode on port 3999.
 
 const path = require('path');
 const fs = require('fs');
@@ -12,7 +15,7 @@ const { createGithubClient } = require('../src/githubClient');
 
 require('dotenv').config({ quiet: true });
 
-const EXT = path.join(__dirname, '..', 'extension');
+const EXT = path.resolve(process.env.EXT_DIR || path.join(__dirname, '..', 'extension'));
 const SHOTS = path.join(__dirname, '..', '.cache', 'screenshots');
 const PORT = 3999;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -48,10 +51,20 @@ function probe() {
 }
 
 (async () => {
-  // local backend (offline AI so the check is fast and free)
-  const gh = createGithubClient({ token: process.env.GITHUB_TOKEN || '', cacheDir: process.env.GITHUB_CACHE_DIR || '.cache' });
-  const server = createApp({ env: {}, gh, provider: null }).listen(PORT);
+  // local backend (offline AI so the check is fast and free), unless BACKEND_URL is given
+  let server = null;
+  let backendUrl = (process.env.BACKEND_URL || '').replace(/\/$/, '');
+  if (!backendUrl) {
+    const gh = createGithubClient({ token: process.env.GITHUB_TOKEN || '', cacheDir: process.env.GITHUB_CACHE_DIR || '.cache' });
+    server = createApp({ env: {}, gh, provider: null }).listen(PORT);
+    backendUrl = `http://127.0.0.1:${PORT}`;
+  }
+  console.log(`Extension: ${EXT}\nBackend:   ${backendUrl}`);
   fs.mkdirSync(SHOTS, { recursive: true });
+  if (!fs.existsSync(puppeteer.executablePath())) {
+    console.error('Chrome for Testing is not installed yet. Run once:  npx puppeteer browsers install chrome');
+    process.exit(1);
+  }
 
   const browser = await puppeteer.launch({
     headless: 'new',
@@ -62,7 +75,7 @@ function probe() {
     // Point the extension at our local backend (via its service worker).
     const swTarget = await browser.waitForTarget((t) => t.type() === 'service_worker' && t.url().endsWith('background.js'), { timeout: 15000 });
     const sw = await swTarget.worker();
-    await sw.evaluate((url) => chrome.storage.local.set({ backendUrl: url }), `http://127.0.0.1:${PORT}`);
+    if (server || process.env.FORCE_BACKEND) await sw.evaluate((url) => chrome.storage.local.set({ backendUrl: url }), backendUrl);
     check('extension service worker loaded', true, swTarget.url().split('/')[2]);
 
     const page = await browser.newPage();
@@ -146,7 +159,7 @@ function probe() {
     check('reduced motion: still frame (video paused, not playing)', s.present && s.idle && s.idle.paused && s.idle.readyState >= 2);
   } finally {
     await browser.close();
-    server.close();
+    if (server) server.close();
   }
   const failed = results.filter((r) => !r.ok);
   console.log(`\n${results.length - failed.length}/${results.length} browser checks passed. Screenshots: ${SHOTS}`);
