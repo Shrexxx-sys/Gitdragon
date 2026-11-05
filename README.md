@@ -13,7 +13,7 @@ A Chrome extension for github.com. A small dragon sits in the corner of every **
 
 ![Screenshot: the dragon in the corner of a repo page](docs/screenshots/dragon.png)
 ![Screenshot: the analysis box with the roast](docs/screenshots/box.png)
-*(Screenshot placeholders: add your own PNGs to `docs/screenshots/`.)*
+*(Taken automatically by `npm run browser-check`. Replace them with your own PNGs in `docs/screenshots/` any time.)*
 
 ---
 
