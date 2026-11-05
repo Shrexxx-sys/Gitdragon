@@ -21,6 +21,15 @@ test('manifest is valid MV3 and every referenced file exists', () => {
   assert.ok(m.host_permissions.includes('http://localhost:3000/*'));
 });
 
+test('.env.example (committed to git) never contains real secrets', () => {
+  const text = fs.readFileSync(path.join(__dirname, '..', '.env.example'), 'utf8');
+  for (const line of text.split(/\r?\n/)) {
+    const m = line.match(/^([A-Z_]*(KEY|TOKEN|SECRET)[A-Z_]*)=(.*)$/);
+    if (m) assert.equal(m[3].trim(), '', `${m[1]} must be empty in .env.example (put real values in .env)`);
+  }
+  assert.doesNotMatch(text, /github_pat_|ghp_|gsk_|AIza|sk-or-/, 'no key-looking strings');
+});
+
 test('page detection: repos, profiles and everything else', () => {
   const cases = {
     'https://github.com/expressjs/cors': { type: 'repo', owner: 'expressjs', name: 'cors' },

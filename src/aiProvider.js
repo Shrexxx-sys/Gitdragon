@@ -19,17 +19,37 @@ const path = require('path');
 const crypto = require('crypto');
 
 const TIMEOUT_MS = 60000;
+const RETRY_STATUSES = [429, 500, 502, 503, 504]; // free tiers are often "busy": these are worth retrying
+const RETRY_DELAYS_MS = [3000, 8000, 20000];
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 async function postJson(url, headers, body) {
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...headers },
-    body: JSON.stringify(body),
-    signal: AbortSignal.timeout(TIMEOUT_MS),
-  });
-  const text = await res.text();
-  if (!res.ok) throw new Error(`AI HTTP ${res.status}: ${text.slice(0, 300)}`);
-  return JSON.parse(text);
+  for (let attempt = 0; ; attempt++) {
+    let res;
+    try {
+      res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...headers },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(TIMEOUT_MS),
+      });
+    } catch (err) {
+      if (attempt < RETRY_DELAYS_MS.length) {
+        await sleep(RETRY_DELAYS_MS[attempt]);
+        continue;
+      }
+      throw new Error(`AI request failed: ${err.message}`);
+    }
+    const text = await res.text();
+    if (res.ok) return JSON.parse(text);
+    if (RETRY_STATUSES.includes(res.status) && attempt < RETRY_DELAYS_MS.length) {
+      const retryAfter = Number(res.headers.get('retry-after')) * 1000;
+      await sleep(Math.min(60000, retryAfter || RETRY_DELAYS_MS[attempt]));
+      continue;
+    }
+    throw new Error(`AI HTTP ${res.status}: ${text.slice(0, 300)}`);
+  }
 }
 
 function chatMessages(system, user) {
@@ -58,18 +78,24 @@ function groqProvider(key, model = 'llama-3.3-70b-versatile') {
 }
 
 // ---- Google Gemini (free tier) ------------------------------------------------------------
-// Key: https://aistudio.google.com/apikey   Models: gemini-2.5-flash, gemini-2.5-flash-lite, ...
-function geminiProvider(key, model = 'gemini-2.5-flash') {
+// Key: https://aistudio.google.com/apikey
+// Models (Nov 2026, free tier): gemini-3.5-flash, gemini-3.6-flash, gemini-3.5-flash-lite, gemini-3.1-flash-lite.
+// (gemini-2.5-* is "no longer available to new users".) Gemma models (gemma-4-*) work too, but are slow.
+function geminiProvider(key, model = 'gemini-3.5-flash') {
+  const isGemma = /^gemma/i.test(model); // Gemma rejects system instructions and JSON mode
   return {
     name: 'gemini',
     model,
     async generate(system, user, { temperature = 0.8 } = {}) {
-      const json = await postJson(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, { 'x-goog-api-key': key }, {
-        systemInstruction: { parts: [{ text: system }] },
-        contents: [{ role: 'user', parts: [{ text: user }] }],
-        generationConfig: { temperature, responseMimeType: 'application/json' },
-      });
-      return json.candidates?.[0]?.content?.parts?.map((p) => p.text || '').join('') || '';
+      const body = isGemma
+        ? { contents: [{ role: 'user', parts: [{ text: `${system}\n\n${user}` }] }], generationConfig: { temperature } }
+        : {
+            systemInstruction: { parts: [{ text: system }] },
+            contents: [{ role: 'user', parts: [{ text: user }] }],
+            generationConfig: { temperature, responseMimeType: 'application/json' },
+          };
+      const json = await postJson(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, { 'x-goog-api-key': key }, body);
+      return json.candidates?.[0]?.content?.parts?.filter((p) => !p.thought).map((p) => p.text || '').join('') || '';
     },
   };
 }
