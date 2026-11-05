@@ -24,6 +24,10 @@ const Errors = {
   network: (detail) =>
     new AutopsyError('NETWORK_ERROR', 502, `Could not reach GitHub (${detail}). Check your internet connection.`),
   badInput: (detail) => new AutopsyError('BAD_INPUT', 400, detail),
+  githubAuth: () =>
+    new AutopsyError('GITHUB_AUTH', 502, "GitHub rejected the server's credentials (the token is expired or revoked). The owner needs to set a new GITHUB_TOKEN."),
+  dailyLimit: (limit) =>
+    new AutopsyError('DAILY_LIMIT', 429, `You've reached today's limit of ${limit} analyses. It resets at midnight UTC. Thanks for keeping this free for everyone!`, { limit }),
   github: (status, detail) =>
     new AutopsyError('GITHUB_ERROR', 502, `GitHub returned an unexpected error (${status}): ${detail}`),
 };

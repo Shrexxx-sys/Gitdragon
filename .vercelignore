@@ -1,0 +1,8 @@
+.cache
+.env
+dist
+test
+scripts
+supabase
+*.md
+!calibration.md

@@ -14,6 +14,7 @@ const FRESH_MS = 10 * 60 * 1000; // re-use a cached answer without asking GitHub
 
 function createGithubClient({ token = '', cacheDir = '', fetchImpl = fetch, freshMs = FRESH_MS } = {}) {
   const memory = new Map();
+  const state = { tokenInvalid: false };
   if (cacheDir) fs.mkdirSync(cacheDir, { recursive: true });
 
   function cacheFile(url) {
@@ -59,6 +60,17 @@ function createGithubClient({ token = '', cacheDir = '', fetchImpl = fetch, fres
     if (res.status === 304 && cached) {
       writeCache(url, { ...cached, savedAt: Date.now() });
       return cached.response;
+    }
+
+    // 401 = our token is expired or revoked. Public data works without a token, so drop it,
+    // remember that it's broken (shown in /health and in the result notices), and retry once.
+    if (res.status === 401) {
+      if (token) {
+        token = '';
+        state.tokenInvalid = true;
+        return get(apiPath, { accept });
+      }
+      throw Errors.githubAuth();
     }
 
     const remaining = res.headers.get('x-ratelimit-remaining');
@@ -133,7 +145,18 @@ function createGithubClient({ token = '', cacheDir = '', fetchImpl = fetch, fres
     }
   }
 
-  return { get, getText, graphql, hasToken: Boolean(token), fetchImpl };
+  return {
+    get,
+    getText,
+    graphql,
+    fetchImpl,
+    get hasToken() {
+      return Boolean(token);
+    },
+    get tokenInvalid() {
+      return state.tokenInvalid;
+    },
+  };
 }
 
 /** Reads the number of the "last" page from a GitHub Link header (used to count commits cheaply). */
