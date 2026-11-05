@@ -71,6 +71,18 @@
     .spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid var(--border); border-top-color: var(--accent);
       border-radius: 50%; animation: spin .8s linear infinite; vertical-align: -2px; margin-right: 6px; }
     @keyframes spin { to { transform: rotate(360deg); } }
+    .intensity { display: flex; margin-top: 10px; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+    .intensity .seg { flex: 1; background: var(--card); color: var(--fg); border: none; border-right: 1px solid var(--border);
+      padding: 6px 0; cursor: pointer; font-family: inherit; font-size: 13px; }
+    .intensity .seg:last-child { border-right: none; }
+    .intensity .seg.active { background: var(--accent); color: #fff; font-weight: 600; }
+    .why-btn { background: none; border: none; color: var(--link); cursor: pointer; padding: 2px 0; font-size: 12px; font-family: inherit; }
+    .why { margin: 4px 0 2px; }
+    .why[hidden] { display: none; }
+    .card { background: var(--card); border: 1px solid var(--border); border-left: 3px solid var(--accent); border-radius: 6px;
+      padding: 6px 8px; font-size: 12px; margin-bottom: 4px; }
+    .card-angle { font-size: 11px; text-transform: uppercase; letter-spacing: .5px; color: var(--muted); margin-bottom: 2px; }
+    .card a { color: var(--link); text-decoration: none; font-size: 11px; }
   `;
 
   // ---------- tiny DOM helper ----------
@@ -118,7 +130,36 @@
   // ---------- state ----------
   let page = { type: 'none', key: 'none' };
   let open = false;
-  const states = {}; // key -> { status: 'idle'|'loading'|'done'|'error', data, error }
+  const states = {}; // "pageKey|intensity" -> { status: 'idle'|'loading'|'done'|'error', data, error }
+  const INTENSITIES = [
+    ['mild', 'Mild'],
+    ['medium', 'Medium'],
+    ['savage', 'Savage'],
+  ];
+  let intensity = 'medium';
+  // Remember the chosen intensity between pages (chrome.storage may be missing in tests).
+  try {
+    chrome.storage.local.get('intensity', (v) => {
+      if (v && INTENSITIES.some(([k]) => k === v.intensity)) {
+        intensity = v.intensity;
+        render();
+      }
+    });
+  } catch {
+    /* no storage: keep the default */
+  }
+
+  function setIntensity(value) {
+    intensity = value;
+    try {
+      chrome.storage.local.set({ intensity: value });
+    } catch {
+      /* ignore */
+    }
+    render();
+  }
+
+  const stateKey = () => `${page.key}|${intensity}`;
 
   function setOpen(value) {
     open = value;
@@ -134,12 +175,13 @@
   // ---------- run ----------
   function run(fresh) {
     const target = page;
-    const st = stateFor(target.key);
+    const key = stateKey();
+    const st = stateFor(key);
     st.status = 'loading';
     st.error = null;
     render();
     try {
-      chrome.runtime.sendMessage({ type: 'GIT_AUTOPSY_RUN', page: target, fresh: Boolean(fresh) }, (resp) => {
+      chrome.runtime.sendMessage({ type: 'GIT_AUTOPSY_RUN', page: target, fresh: Boolean(fresh), intensity }, (resp) => {
         const lastErr = chrome.runtime.lastError;
         if (lastErr || !resp) {
           st.status = 'error';
@@ -151,7 +193,7 @@
           st.status = 'error';
           st.error = resp.error;
         }
-        if (page.key === target.key) render(); // user may have navigated away meanwhile
+        if (stateKey() === key) render(); // user may have navigated away or switched intensity meanwhile
       });
     } catch (err) {
       // Happens if the extension was reloaded while this tab stayed open.
@@ -168,10 +210,19 @@
       body.appendChild(el('p', { text: 'Open a GitHub repository or a user profile to run an autopsy.' }));
       return;
     }
-    const st = stateFor(page.key);
+    const st = stateFor(stateKey());
     body.appendChild(
       el('div', {}, [el('span', { class: 'target', text: page.label }), el('span', { class: 'kind', text: page.type === 'repo' ? 'repository' : 'profile' })])
     );
+
+    // Intensity selector (each intensity keeps its own result).
+    const seg = el('div', { class: 'intensity', role: 'radiogroup', 'aria-label': 'Roast intensity' });
+    for (const [value, label] of INTENSITIES) {
+      const b = el('button', { class: 'seg' + (value === intensity ? ' active' : ''), role: 'radio', 'aria-checked': String(value === intensity), 'data-intensity': value, text: label, onclick: () => setIntensity(value) });
+      if (st.status === 'loading') b.disabled = true;
+      seg.appendChild(b);
+    }
+    body.appendChild(seg);
 
     const runBtn = el('button', { class: 'run', onclick: () => run(false) }, st.status === 'loading' ? [el('span', { class: 'spinner' }), 'Examining…'] : 'Run Autopsy');
     if (st.status === 'loading') runBtn.disabled = true;
@@ -222,8 +273,10 @@
       body.appendChild(field);
     }
 
-    body.appendChild(el('h2', { text: 'The Autopsy' }));
-    body.appendChild(el('ol', { class: 'roast' }, (d.roast || []).map((line) => el('li', { text: line }))));
+    body.appendChild(el('h2', { text: `The Autopsy${d.intensity ? ` · ${d.intensity}` : ''}` }));
+    const jokes = d.jokes || (d.roast || []).map((text) => ({ text, cards: [] }));
+    const cardsById = Object.fromEntries((d.cards || []).map((c) => [c.id, c]));
+    body.appendChild(el('ol', { class: 'roast' }, jokes.map((j) => renderJoke(j, cardsById))));
 
     body.appendChild(el('h2', { text: 'Evidence' }));
     const details = el('details', {}, [el('summary', { text: `${(d.evidence || []).length} facts measured by code (click to check)` })]);
@@ -241,6 +294,36 @@
     body.appendChild(
       el('p', { class: 'muted', text: `Written by: ${d.generatedBy}${d.cached ? ' · cached result' : ''} · analysed ${new Date(d.analysedAt).toLocaleString()}` })
     );
+  }
+
+  /** One roast line + a "Why this joke?" toggle that reveals the evidence card(s) behind it. */
+  function renderJoke(joke, cardsById) {
+    const li = el('li', {}, [el('div', { class: 'joke', text: joke.text })]);
+    const cards = (joke.cards || []).map((id) => cardsById[id]).filter(Boolean);
+    if (!cards.length) return li;
+    const why = el('div', { class: 'why', hidden: '' });
+    for (const c of cards) {
+      const box = el('div', { class: 'card' }, [
+        el('div', { class: 'card-angle', text: c.angle.replace(/_/g, ' ') }),
+        el('div', { text: c.fact }),
+      ]);
+      if (c.exact_quote) box.appendChild(el('div', { class: 'muted', text: `Exact quote: "${c.exact_quote}"` }));
+      if (c.number != null) box.appendChild(el('div', { class: 'muted', text: `Key number: ${c.number}` }));
+      if (/^https:\/\/(api\.)?github\.com\/[^{}\s]*$/.test(c.source_url || '')) {
+        box.appendChild(el('a', { href: c.source_url, target: '_blank', rel: 'noopener noreferrer', text: 'check the source ↗' }));
+      }
+      why.appendChild(box);
+    }
+    const btn = el('button', { class: 'why-btn', 'aria-expanded': 'false', text: 'Why this joke?' });
+    btn.addEventListener('click', () => {
+      const show = why.hidden;
+      why.hidden = !show;
+      btn.setAttribute('aria-expanded', String(show));
+      btn.textContent = show ? 'Hide evidence' : 'Why this joke?';
+    });
+    li.appendChild(btn);
+    li.appendChild(why);
+    return li;
   }
 
   // ---------- follow GitHub navigation (it changes pages without full reloads) ----------

@@ -9,13 +9,18 @@ async function getBackendUrl() {
   return (backendUrl || DEFAULT_BACKEND).replace(/\/$/, '');
 }
 
-async function runAutopsy(page, fresh) {
+const INTENSITIES = ['mild', 'medium', 'savage'];
+
+async function runAutopsy(page, fresh, intensity) {
   const backend = await getBackendUrl();
   const path =
     page.type === 'repo'
       ? `/repo/${encodeURIComponent(page.owner)}/${encodeURIComponent(page.name)}`
       : `/profile/${encodeURIComponent(page.username)}`;
-  const url = backend + path + (fresh ? '?fresh=1' : '');
+  const params = new URLSearchParams();
+  params.set('intensity', INTENSITIES.includes(intensity) ? intensity : 'medium');
+  if (fresh) params.set('fresh', '1');
+  const url = `${backend}${path}?${params}`;
 
   let res;
   try {
@@ -47,6 +52,6 @@ async function runAutopsy(page, fresh) {
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (!msg || msg.type !== 'GIT_AUTOPSY_RUN') return false;
-  runAutopsy(msg.page, msg.fresh).then(sendResponse);
+  runAutopsy(msg.page, msg.fresh, msg.intensity).then(sendResponse);
   return true; // keep the message channel open for the async answer
 });

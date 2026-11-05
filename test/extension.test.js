@@ -104,6 +104,65 @@ test('panel: shows tab on repo pages, runs autopsy and renders summary, roast, e
   }
 });
 
+const jokeData = {
+  ...sampleData,
+  intensity: 'savage',
+  roast: ['705 days flatlined (2022-05-14 to 2024-04-19), then a pulse.', 'Second line.', 'Third line.'],
+  jokes: [
+    { text: '705 days flatlined (2022-05-14 to 2024-04-19), then a pulse.', cards: ['C1'] },
+    { text: 'Second line.', cards: ['C2'] },
+    { text: 'Third line.', cards: [] },
+  ],
+  cards: [
+    { id: 'C1', angle: 'long_gap', fact: 'Once went 705 days without a commit (2022-05-14 to 2024-04-19).', number: 705, exact_quote: null, source_url: 'https://api.github.com/repos/expressjs/cors/commits?per_page=100' },
+    { id: 'C2', angle: 'latest_message', fact: 'The most recent commit message is "docs: tweak".', number: null, exact_quote: 'docs: tweak', source_url: 'https://api.github.com/repos/expressjs/cors/commits' },
+  ],
+};
+
+test('panel: intensity selector sends the chosen intensity and keeps one result per intensity', () => {
+  const { w, sent, $, $$ } = loadPanel('https://github.com/expressjs/cors', (msg, cb) => cb({ ok: true, data: { ...jokeData, intensity: msg.intensity } }));
+  try {
+    $('.tab').click();
+    assert.deepEqual($$('.intensity .seg').map((b) => b.textContent), ['Mild', 'Medium', 'Savage']);
+    assert.equal($('.intensity .seg.active').dataset.intensity, 'medium', 'medium is the default');
+    $('.intensity .seg[data-intensity="savage"]').click();
+    assert.equal($('.intensity .seg.active').dataset.intensity, 'savage');
+    $('button.run').click();
+    assert.equal(sent[0].intensity, 'savage');
+    assert.match($('.body').textContent, /The Autopsy · savage/);
+    // switching to mild shows that intensity's own (empty) state, not the savage result
+    $('.intensity .seg[data-intensity="mild"]').click();
+    assert.equal($$('ol.roast li').length, 0);
+    $('.intensity .seg[data-intensity="savage"]').click();
+    assert.equal($$('ol.roast li').length, 3, 'savage result is still there');
+  } finally {
+    w.close();
+  }
+});
+
+test('panel: "Why this joke?" reveals the evidence card behind each line', () => {
+  const { w, $, $$ } = loadPanel('https://github.com/expressjs/cors', (msg, cb) => cb({ ok: true, data: jokeData }));
+  try {
+    $('.tab').click();
+    $('button.run').click();
+    const items = $$('ol.roast li');
+    assert.equal(items.length, 3);
+    assert.equal($$('.why-btn').length, 2, 'only jokes with cards get the button');
+    const why = items[0].querySelector('.why');
+    assert.equal(why.hidden, true);
+    items[0].querySelector('.why-btn').click();
+    assert.equal(why.hidden, false);
+    assert.match(why.textContent, /long gap/);
+    assert.match(why.textContent, /705 days without a commit/);
+    assert.equal(why.querySelector('a').getAttribute('href'), 'https://api.github.com/repos/expressjs/cors/commits?per_page=100');
+    assert.match(items[1].querySelector('.why').textContent, /Exact quote: "docs: tweak"/);
+    items[0].querySelector('.why-btn').click();
+    assert.equal(why.hidden, true, 'click again hides it');
+  } finally {
+    w.close();
+  }
+});
+
 test('panel: shows clear error messages', () => {
   const { w, $ } = loadPanel('https://github.com/someone/private-thing', (msg, cb) =>
     cb({ ok: false, error: { code: 'NOT_FOUND', message: 'Repository someone/private-thing was not found. It may be private, deleted, or misspelled.' } })
@@ -150,6 +209,7 @@ function loadBackground(storage = {}) {
     fetch,
     AbortSignal,
     encodeURIComponent,
+    URLSearchParams,
     console,
   };
   vm.runInNewContext(read('background.js'), context);
@@ -163,7 +223,7 @@ function loadBackground(storage = {}) {
 test('background: calls the backend and passes results / errors through', async (t) => {
   const server = http.createServer((req, res) => {
     res.setHeader('Content-Type', 'application/json');
-    if (req.url === '/repo/expressjs/cors?fresh=1') return res.end(JSON.stringify({ target: 'expressjs/cors' }));
+    if (req.url === '/repo/expressjs/cors?intensity=savage&fresh=1') return res.end(JSON.stringify({ target: 'expressjs/cors' }));
     res.statusCode = 404;
     res.end(JSON.stringify({ error: { code: 'NOT_FOUND', message: 'nope' } }));
   });
@@ -171,7 +231,7 @@ test('background: calls the backend and passes results / errors through', async 
   t.after(() => server.close());
   const send = loadBackground({ backendUrl: `http://127.0.0.1:${server.address().port}` });
 
-  const ok = await send({ type: 'GIT_AUTOPSY_RUN', page: { type: 'repo', owner: 'expressjs', name: 'cors' }, fresh: true });
+  const ok = await send({ type: 'GIT_AUTOPSY_RUN', page: { type: 'repo', owner: 'expressjs', name: 'cors' }, fresh: true, intensity: 'savage' });
   assert.deepEqual(ok, { ok: true, data: { target: 'expressjs/cors' } });
 
   const missing = await send({ type: 'GIT_AUTOPSY_RUN', page: { type: 'profile', username: 'ghost' } });

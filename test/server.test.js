@@ -92,6 +92,21 @@ test('GitHub unreachable -> 502 with NETWORK_ERROR', async (t) => {
   assert.equal((await res.json()).error.code, 'NETWORK_ERROR');
 });
 
+test('?intensity= changes the roast, returns jokes with evidence cards, and is validated', async (t) => {
+  const { server, base } = await startServer(replayFetch(allFixtures));
+  t.after(() => server.close());
+  const mild = await (await fetch(`${base}/repo/octocat/Hello-World?intensity=mild`)).json();
+  const savage = await (await fetch(`${base}/repo/octocat/Hello-World?intensity=savage`)).json();
+  assert.equal(mild.intensity, 'mild');
+  assert.equal(savage.intensity, 'savage');
+  assert.notDeepEqual(mild.roast, savage.roast, 'each intensity has its own wording (and cache entry)');
+  for (const j of savage.jokes) assert.ok(j.cards.length && j.cards.every((id) => savage.cards.some((c) => c.id === id)));
+  assert.equal(savage.cards[0].angle, 'abandoned');
+  const bad = await fetch(`${base}/repo/octocat/Hello-World?intensity=nuclear`);
+  assert.equal(bad.status, 400);
+  assert.match((await bad.json()).error.message, /mild, medium, savage/);
+});
+
 test('/ shows a help message instead of an error', async (t) => {
   const { server, base } = await startServer(replayFetch(allFixtures));
   t.after(() => server.close());
