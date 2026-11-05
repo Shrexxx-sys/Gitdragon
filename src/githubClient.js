@@ -63,6 +63,7 @@ function createGithubClient({ token = '', cacheDir = '', fetchImpl = fetch, fres
 
     const remaining = res.headers.get('x-ratelimit-remaining');
     if ((res.status === 403 || res.status === 429) && (remaining === '0' || res.headers.get('retry-after'))) {
+      if (cached) return cached.response; // rate limited, but we have an older copy: better than failing
       const reset = Number(res.headers.get('x-ratelimit-reset'));
       throw Errors.rateLimited(reset ? new Date(reset * 1000) : null);
     }

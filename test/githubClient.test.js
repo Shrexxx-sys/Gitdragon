@@ -61,6 +61,19 @@ test('disk cache re-validates with ETag and reuses data on 304', async () => {
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
+test('when rate limited, an older cached copy is used instead of failing', async () => {
+  let limited = false;
+  const fetchImpl = async () =>
+    limited
+      ? new Response('{"message":"API rate limit exceeded"}', { status: 403, headers: { 'x-ratelimit-remaining': '0' } })
+      : new Response('{"login":"x"}', { status: 200, headers: { etag: '"e1"' } });
+  const gh = createGithubClient({ fetchImpl, freshMs: 0 });
+  await gh.get('/users/x');
+  limited = true;
+  assert.deepEqual((await gh.get('/users/x')).data, { login: 'x' });
+  await assert.rejects(gh.get('/users/never-fetched'), (err) => err.code === 'RATE_LIMITED');
+});
+
 test('token is sent as a Bearer header', async () => {
   let auth;
   const gh = createGithubClient({
