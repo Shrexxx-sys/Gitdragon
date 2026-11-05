@@ -69,6 +69,14 @@ test('organizations use the /orgs/ repo list', async () => {
   assert.ok(calls.some((u) => u.startsWith('https://api.github.com/orgs/acme/repos')));
 });
 
+test('with a token, an empty GraphQL pinned list falls back to the profile page', async () => {
+  const fx = loadFixture('profile-octocat');
+  const gh = createGithubClient({ token: 'tok', fetchImpl: replayFetch(fx) });
+  gh.graphql = async () => ({ data: { repositoryOwner: { pinnedItems: { nodes: [] } } } }); // what fine-grained tokens get
+  const raw = await collectProfile(gh, 'octocat');
+  assert.ok(raw.pinned.length > 0);
+});
+
 test('pinned repos are parsed from profile HTML', () => {
   const html =
     '<div class="js-pinned-items-reorder-container"><a href="/me/cool-app" class="Link"><span class="repo">cool-app</span></a>' +

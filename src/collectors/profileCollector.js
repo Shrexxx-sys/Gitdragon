@@ -5,10 +5,17 @@ const { Errors } = require('../errors');
 
 const MAX_REPO_PAGES = 3; // up to 300 repos, most recently pushed first
 
-/** Pinned repos are not in the REST API. With a token we use GraphQL, otherwise we read the public profile page. */
+/**
+ * Pinned repos are not in the REST API. With a token we try GraphQL first.
+ * Some tokens (e.g. fine-grained ones) get an empty list from GraphQL, so if it finds nothing
+ * we also read the public profile page.
+ */
 async function getPinned(gh, username) {
   try {
-    if (gh.hasToken) return await getPinnedGraphql(gh, username);
+    if (gh.hasToken) {
+      const fromGraphql = await getPinnedGraphql(gh, username).catch(() => null);
+      if (fromGraphql && fromGraphql.length) return fromGraphql;
+    }
     const res = await gh.fetchImpl(`https://github.com/${encodeURIComponent(username)}`, {
       headers: { 'User-Agent': 'git-autopsy', Accept: 'text/html' },
     });
