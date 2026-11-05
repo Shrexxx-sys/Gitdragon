@@ -1,18 +1,24 @@
 {
   "manifest_version": 3,
   "name": "Git Autopsy",
-  "version": "0.1.0",
-  "description": "Summarizes and roasts GitHub repos and profiles using only real, checkable facts.",
+  "version": "0.3.0",
+  "description": "A dragon that summarizes and roasts GitHub repos and profiles, using only real, checkable facts.",
   "permissions": ["storage"],
-  "host_permissions": ["http://localhost:3000/*", "http://127.0.0.1:3000/*"],
+  "host_permissions": ["http://localhost:3000/*", "http://127.0.0.1:3000/*", "https://*.vercel.app/*"],
   "background": {
     "service_worker": "background.js"
   },
   "content_scripts": [
     {
       "matches": ["https://github.com/*"],
-      "js": ["pageDetect.js", "content.js"],
+      "js": ["pageDetect.js", "dragon.js", "content.js"],
       "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["mascot/*"],
+      "matches": ["https://github.com/*"]
     }
   ],
   "icons": {
