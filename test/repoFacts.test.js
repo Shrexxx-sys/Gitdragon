@@ -97,7 +97,7 @@ test('empty repository: no crash, clear notice, zero commits', async () => {
   assert.ok(result.notices.some((n) => /empty/i.test(n)));
   const out = offlineWrite(result);
   assert.ok(out.roast.length >= 3);
-  assert.ok(out.roast.some((l) => /zero commits/i.test(l)));
+  assert.ok(out.roast.some((l) => /\b0 commits/i.test(l)));
   assert.equal(out.summary.how_to_run, 'Nothing to run yet.');
 });
 

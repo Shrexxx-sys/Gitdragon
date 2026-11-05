@@ -179,7 +179,9 @@ function busiestDay(dates) {
   const perDay = {};
   for (const d of dates) perDay[day(d)] = (perDay[day(d)] || 0) + 1;
   const top = Object.entries(perDay).sort((a, b) => b[1] - a[1])[0];
-  return top ? { date: top[0], count: top[1] } : null;
+  if (!top) return null;
+  const after = dates.filter((d) => day(d) > top[0]).length; // commits made AFTER that day
+  return { date: top[0], count: top[1], after };
 }
 
 /** Local commit hours (from the .patch Date lines). "Night" = 1:00 to 4:59 local time. */

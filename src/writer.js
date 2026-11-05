@@ -1,11 +1,12 @@
 // WRITER: turns verified facts into { summary, roast }.
-// 1. Builds a prompt that contains ONLY our evidence.
-// 2. Asks the AI for strict JSON.
-// 3. Validates the JSON (shape + "every number must appear in the evidence").
-// 4. Retries with the list of problems if validation fails.
-// 5. If there is no AI (or it keeps failing), uses the offline template writer.
+//   Summary: one AI call (summary model), validated: correct shape, no invented numbers, real file names.
+//   Roast:   src/comedy/comedyWriter.js (angles -> evidence cards -> two-pass AI -> automatic checks).
+//            The comedy model only ever sees the evidence cards (not the bio or name), which keeps it on the LIMIT.
+// No AI configured, or it keeps failing -> offline templates (still built only from facts).
 
-const { offlineWrite } = require('./offlineWriter');
+const { offlineSummary } = require('./offlineWriter');
+const { writeRoast } = require('./comedy/comedyWriter');
+const { extractNumbers, parseJson } = require('./textUtil');
 
 const MAX_ATTEMPTS = 3;
 
@@ -17,8 +18,7 @@ const SCHEMAS = {
     "what_it_does": "1-3 plain sentences: what this project is and does.",
     "how_to_run": "1-3 sentences with the actual commands, taken from the README commands or npm scripts. If none are in the evidence, say the README gives no run instructions.",
     "read_first": ["README.md", "package.json", "src/index.js"]
-  },
-  "roast": ["line 1", "line 2", "line 3", "line 4", "line 5"]
+  }
 }`,
   },
   profile: {
@@ -28,8 +28,7 @@ const SCHEMAS = {
     "what_they_build": "1-3 plain sentences: what kind of projects this developer/organization mostly builds.",
     "main_languages": "Short list of their main languages, from the evidence.",
     "notable_repos": ["repo-name: one short phrase about it", "another-repo: ..."]
-  },
-  "roast": ["line 1", "line 2", "line 3", "line 4", "line 5"]
+  }
 }`,
   },
 };
@@ -37,134 +36,123 @@ const SCHEMAS = {
 function buildPrompt(result) {
   const schema = SCHEMAS[result.kind];
   const system = [
-    'You are Git Autopsy: a witty but accurate code reviewer who writes a short summary and a roast of a GitHub ' +
-      (result.kind === 'repo' ? 'repository' : 'profile') + '.',
+    'You are Git Autopsy: an accurate technical writer who summarizes a GitHub ' + (result.kind === 'repo' ? 'repository' : 'profile') + ' for a student.',
     'STRICT RULES:',
     '- Use ONLY the facts in the EVIDENCE section. Never invent numbers, files, dates, names or details.',
     '- Every number you write must appear exactly in the evidence (copy it, do not round or estimate).',
-    '- The summary must be plain, simple and technically correct. No jokes in the summary.',
-    '- The roast is 4 to 6 short lines (max 220 characters each). Each line must be built on a specific fact from the evidence.',
-    '- Roast the code and habits, never the person\'s identity, looks, gender, race, nationality or anything outside the evidence. Keep it playful, not cruel. No profanity.',
+    '- Plain, simple and technically correct. No jokes.',
     '- Reply with JSON only, exactly this shape:',
     schema.example,
   ].join('\n');
 
   const lines = result.evidence.map((e) => `- ${e.label}: ${e.value}`);
   let user = `TARGET: ${result.target} (${result.kind})\n\nEVIDENCE:\n${lines.join('\n')}`;
-  if (result.context && result.context.readmeExcerpt) {
-    user += `\n\nREADME EXCERPT (for the summary only):\n"""\n${result.context.readmeExcerpt}\n"""`;
-  }
+  if (result.context && result.context.readmeExcerpt) user += `\n\nREADME EXCERPT:\n"""\n${result.context.readmeExcerpt}\n"""`;
   return { system, user };
 }
 
-/** Finds standalone numbers in text: "1,234 stars", "70%", "2021-03-04" -> [1234, 70, 2021, 3, 4]. Ignores "v2", "Python3", "3D". */
-function extractNumbers(text) {
-  const out = [];
-  const re = /(?<![\w.])\d+(?:,\d{3})*(?:\.\d+)?(?![\w])/g;
-  for (const m of String(text).match(re) || []) out.push(Number(m.replace(/,/g, '')));
-  return out;
+function evidenceText(result) {
+  return result.evidence.map((e) => `${e.label}: ${e.value}`).join('\n') + '\n' + ((result.context && result.context.readmeExcerpt) || '');
 }
 
-function parseJson(text) {
-  const cleaned = String(text || '')
-    .trim()
-    .replace(/^```(?:json)?\s*/i, '')
-    .replace(/```$/, '')
-    .trim();
-  return JSON.parse(cleaned);
-}
-
-/** Returns a list of problems (empty list = valid). */
-function validateOutput(output, result) {
+/** Problems with a summary object (empty list = valid). */
+function validateSummary(s, result) {
   const problems = [];
   const schema = SCHEMAS[result.kind];
-  if (!output || typeof output !== 'object') return ['Output is not a JSON object.'];
-
-  const s = output.summary;
-  if (!s || typeof s !== 'object' || Array.isArray(s)) {
-    problems.push('"summary" must be an object.');
-  } else {
-    for (const [field, type] of Object.entries(schema.fields)) {
-      const v = s[field];
-      if (type === 'string' && (typeof v !== 'string' || !v.trim())) problems.push(`summary.${field} must be a non-empty string.`);
-      if (type === 'string' && typeof v === 'string' && v.length > 700) problems.push(`summary.${field} is too long (max 700 chars).`);
-      if (type === 'array' && (!Array.isArray(v) || v.some((x) => typeof x !== 'string' || !x.trim()))) problems.push(`summary.${field} must be an array of strings.`);
-    }
+  if (!s || typeof s !== 'object' || Array.isArray(s)) return ['"summary" must be an object.'];
+  for (const [field, type] of Object.entries(schema.fields)) {
+    const v = s[field];
+    if (type === 'string' && (typeof v !== 'string' || !v.trim())) problems.push(`summary.${field} must be a non-empty string.`);
+    if (type === 'string' && typeof v === 'string' && v.length > 700) problems.push(`summary.${field} is too long (max 700 chars).`);
+    if (type === 'array' && (!Array.isArray(v) || v.some((x) => typeof x !== 'string' || !x.trim()))) problems.push(`summary.${field} must be an array of strings.`);
   }
-
-  const roast = output.roast;
-  if (!Array.isArray(roast) || roast.length < 3 || roast.length > 7) problems.push('"roast" must be an array of 3 to 7 strings.');
-  else if (roast.some((l) => typeof l !== 'string' || l.trim().length < 8 || l.length > 300)) problems.push('Each roast line must be a string of 8 to 300 characters.');
-
   if (problems.length) return problems;
 
-  // Grounding check: numbers must come from the evidence (0 and 1 are allowed as ordinary words).
-  const evidenceText = result.evidence.map((e) => `${e.label}: ${e.value}`).join('\n') + '\n' + ((result.context && result.context.readmeExcerpt) || '');
-  const allowed = new Set([0, 1, ...extractNumbers(evidenceText)]);
-  const written = [...Object.values(s).flat(), ...roast].join('\n');
-  const invented = [...new Set(extractNumbers(written).filter((n) => !allowed.has(n)))];
+  const ev = evidenceText(result);
+  const allowed = new Set([0, 1, ...extractNumbers(ev)]);
+  const invented = [...new Set(extractNumbers(Object.values(s).flat().join('\n')).filter((n) => !allowed.has(n)))];
   if (invented.length) problems.push(`These numbers are not in the evidence, remove or correct them: ${invented.join(', ')}.`);
-
-  // read_first files must be real files from the evidence.
   if (result.kind === 'repo' && Array.isArray(s.read_first)) {
-    const fake = s.read_first.filter((f) => !evidenceText.includes(f.trim()));
+    const fake = s.read_first.filter((f) => !ev.includes(f.trim()));
     if (fake.length) problems.push(`summary.read_first contains files not in the evidence: ${fake.join(', ')}. Use only file paths listed in the evidence.`);
   }
   return problems;
 }
 
-function clean(output, kind) {
-  const summary = {};
-  for (const field of Object.keys(SCHEMAS[kind].fields)) {
-    const v = output.summary[field];
-    summary[field] = Array.isArray(v) ? v.map((x) => x.trim()).slice(0, 6) : v.trim();
+/**
+ * Validates a full { summary, roast: [strings] } output (summary rules + roast shape + numbers).
+ * Used by the smoke test to check final results.
+ */
+function validateOutput(output, result) {
+  if (!output || typeof output !== 'object') return ['Output is not a JSON object.'];
+  const problems = validateSummary(output.summary, result);
+  const roast = output.roast;
+  if (!Array.isArray(roast) || roast.length < 3 || roast.length > 7) problems.push('"roast" must be an array of 3 to 7 strings.');
+  else if (roast.some((l) => typeof l !== 'string' || l.trim().length < 8 || l.length > 300)) problems.push('Each roast line must be a string of 8 to 300 characters.');
+  else {
+    const allowed = new Set([0, 1, 5, ...extractNumbers(evidenceText(result))]);
+    const invented = [...new Set(extractNumbers(roast.join('\n')).filter((n) => !allowed.has(n)))];
+    if (invented.length) problems.push(`These numbers are not in the evidence, remove or correct them: ${invented.join(', ')}.`);
   }
-  return { summary, roast: output.roast.map((l) => l.trim()) };
+  return problems;
 }
 
-/**
- * @param result   output of computeRepoFacts / computeProfileFacts
- * @param provider from aiProvider.getProvider() (null = offline)
- * @returns { summary, roast, generatedBy, attempts, warnings }
- */
-async function write(result, provider) {
-  if (!provider) {
-    return { ...offlineWrite(result), generatedBy: 'offline templates (no AI configured)', attempts: 0, warnings: [] };
+function cleanSummary(s, kind) {
+  const out = {};
+  for (const field of Object.keys(SCHEMAS[kind].fields)) {
+    const v = s[field];
+    out[field] = Array.isArray(v) ? v.map((x) => x.trim()).slice(0, 6) : v.trim();
   }
+  return out;
+}
 
+/** @returns { summary, by, attempts, warnings } */
+async function writeSummary(result, provider) {
+  if (!provider) return { summary: offlineSummary(result), by: 'offline templates', attempts: 0, warnings: [] };
   const { system, user } = buildPrompt(result);
   const warnings = [];
   let feedback = '';
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     let text;
     try {
-      text = await provider.generate(system, user + feedback);
+      text = await provider.generate(system, user + feedback, { temperature: 0.3 });
     } catch (err) {
-      warnings.push(`AI call failed (attempt ${attempt}): ${err.message}`);
+      warnings.push(`summary: AI call failed (attempt ${attempt}): ${err.message}`);
       continue;
     }
     let parsed;
     try {
       parsed = parseJson(text);
     } catch {
-      warnings.push(`Attempt ${attempt}: AI did not return valid JSON.`);
+      warnings.push(`summary attempt ${attempt}: AI did not return valid JSON.`);
       feedback = '\n\nYour previous reply was not valid JSON. Reply with JSON only, in the exact shape given.';
       continue;
     }
-    const problems = validateOutput(parsed, result);
-    if (!problems.length) {
-      return { ...clean(parsed, result.kind), generatedBy: `${provider.name} (${provider.model})`, attempts: attempt, warnings };
-    }
-    warnings.push(`Attempt ${attempt} rejected: ${problems.join(' ')}`);
+    const problems = validateSummary(parsed && parsed.summary, result);
+    if (!problems.length) return { summary: cleanSummary(parsed.summary, result.kind), by: `${provider.name} (${provider.model})`, attempts: attempt, warnings };
+    warnings.push(`summary attempt ${attempt} rejected: ${problems.join(' ')}`);
     feedback = `\n\nYour previous reply was rejected for these reasons:\n- ${problems.join('\n- ')}\nFix them and reply again with JSON only.`;
   }
+  return { summary: offlineSummary(result), by: `offline templates (AI summary failed validation ${MAX_ATTEMPTS} times)`, attempts: MAX_ATTEMPTS, warnings };
+}
 
+/**
+ * @param result     output of computeRepoFacts / computeProfileFacts
+ * @param providers  { summary, humor } from aiProvider.getProvider() (null = offline)
+ * @param options    { intensity: 'mild'|'medium'|'savage', calibration }
+ * @returns { summary, roast: [strings], jokes: [{text, cards}], cards, generatedBy, warnings }
+ */
+async function write(result, providers = {}, options = {}) {
+  const [s, r] = await Promise.all([writeSummary(result, providers.summary || null), writeRoast(result, providers.humor || null, options)]);
   return {
-    ...offlineWrite(result),
-    generatedBy: `offline templates (AI output failed validation ${MAX_ATTEMPTS} times)`,
-    attempts: MAX_ATTEMPTS,
-    warnings,
+    summary: s.summary,
+    roast: r.jokes.map((j) => j.text),
+    jokes: r.jokes,
+    cards: r.cards,
+    generatedBy: s.by === r.generatedBy ? s.by : `summary: ${s.by} · roast: ${r.generatedBy}`,
+    warnings: [...s.warnings, ...r.warnings],
+    debug: r.debug,
   };
 }
 
-module.exports = { write, buildPrompt, validateOutput, extractNumbers, parseJson, SCHEMAS };
+module.exports = { write, writeSummary, buildPrompt, validateSummary, validateOutput, extractNumbers, parseJson, SCHEMAS };
